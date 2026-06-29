@@ -1,0 +1,50 @@
+name: Refresh match data
+
+# Runs the data pipeline on a schedule and commits the updated SQLite DB.
+# Streamlit Cloud redeploys automatically when the commit lands on main.
+
+on:
+  schedule:
+    - cron: "0 */3 * * *"   # every 3 hours (UTC)
+  workflow_dispatch: {}      # allow manual runs from the Actions tab
+
+# Allow the workflow to push the refreshed database back to the repo.
+permissions:
+  contents: write
+
+# Never let two refreshes run at once.
+concurrency:
+  group: refresh-data
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run pipeline
+        env:
+          FOOTBALL_API_KEY: ${{ secrets.FOOTBALL_API_KEY }}
+        run: python pipeline/update.py
+
+      - name: Commit refreshed database if it changed
+        run: |
+          if git diff --quiet -- database/database.db; then
+            echo "No data changes — nothing to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add database/database.db
+          git commit -m "chore: refresh match data [skip ci]"
+          git push
