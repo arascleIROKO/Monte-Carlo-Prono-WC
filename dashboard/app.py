@@ -248,6 +248,14 @@ div[data-testid="stExpander"] {
     font-weight: 900;
     text-align: right;
 }
+.mc-kickoff-live {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 7px;
+    color: #1f9d57;
+    letter-spacing: 0.04em;
+}
 .mc-small-label {
     color: var(--mc-muted);
     font-size: 0.78rem;
@@ -887,19 +895,6 @@ def _compute_ev_matrix(matrix: np.ndarray) -> np.ndarray:
     return ev_mat
 
 
-def _refresh_data_pipeline() -> None:
-    """Run the data pipeline from the dashboard refresh action."""
-    from pipeline.update import run_pipeline
-
-    with st.spinner("Mise à jour des matchs, ratings Elo et prédictions..."):
-        run_pipeline()
-
-    # Drop cached DB queries / computations so the new data is picked up.
-    st.cache_data.clear()
-    st.session_state["last_data_refresh"] = datetime.now().strftime("%d/%m/%Y %H:%M")
-    st.success("Données rafraîchies. Le moteur est à jour.")
-
-
 @st.cache_data(ttl=600, show_spinner=False)
 def _data_last_updated() -> datetime | None:
     """When the data was last refreshed — the most recent Team.last_update."""
@@ -938,20 +933,12 @@ def _render_app_header() -> None:
         unsafe_allow_html=True,
     )
 
-    left, right = st.columns([4, 1.15])
-    with left:
-        st.markdown(
-            """
-<div class="mc-strip">Pronos du soir, historique des résultats et simulateur Elo — tout est à jour.</div>
+    st.markdown(
+        """
+<div class="mc-strip">Pronos du soir, historique des résultats et simulateur Elo — données rafraîchies automatiquement.</div>
 """,
-            unsafe_allow_html=True,
-        )
-    with right:
-        if st.button("Refresh data", help="Lance la pipeline de données complète."):
-            try:
-                _refresh_data_pipeline()
-            except Exception as exc:
-                st.error(f"Refresh impossible : {exc}")
+        unsafe_allow_html=True,
+    )
 
 
 # ------------------------------------------------------------------ #
@@ -1065,6 +1052,8 @@ def _render_heatmaps(
 
 def _match_card(m: dict, calc: dict) -> None:
     local = _local_dt(m["date"])
+    now_utc = datetime.now(tz=timezone.utc).replace(tzinfo=None)
+    is_live = m["date"] <= now_utc
     probs = calc["probs"]
     top = calc["top"]
     rec = calc["rec"]
@@ -1077,10 +1066,12 @@ def _match_card(m: dict, calc: dict) -> None:
             f"<p class='mc-match-title'>{m['home_name']}  vs  {m['away_name']}</p>",
             unsafe_allow_html=True,
         )
-        h2.markdown(
-            f"<p class='mc-kickoff'>Kickoff {local.strftime('%H:%M')}</p>",
-            unsafe_allow_html=True,
+        kickoff_html = (
+            "<p class='mc-kickoff mc-kickoff-live'><span class='mc-dot'></span>LIVE</p>"
+            if is_live
+            else f"<p class='mc-kickoff'>Kickoff {local.strftime('%H:%M')}</p>"
         )
+        h2.markdown(kickoff_html, unsafe_allow_html=True)
 
         _win_prob_bar(probs, m["home_name"], m["away_name"], key=f"prob_{mid}")
 
@@ -1116,13 +1107,14 @@ def _match_card(m: dict, calc: dict) -> None:
 @st.fragment
 def render_upcoming() -> None:
     now_utc = datetime.now(tz=timezone.utc).replace(tzinfo=None)
-    # Only show matches whose kickoff is still ahead — a match that has
-    # already started but isn't marked FINISHED yet (stale status) should not
-    # linger under "Tonight".
-    matches = [m for m in _load_upcoming() if m["date"] >= now_utc]
+    # Keep upcoming and in-play matches, but drop ones whose kickoff is more
+    # than ~3h old (a played game that simply hasn't been marked FINISHED yet),
+    # so stale fixtures don't linger under "Tonight".
+    live_grace = timedelta(hours=3)
+    matches = [m for m in _load_upcoming() if m["date"] >= now_utc - live_grace]
 
     if not matches:
-        st.info("No upcoming matches right now. Hit Refresh data once the next fixtures are in.")
+        st.info("No matches on right now — check back when the next fixtures kick off.")
         return
 
     today_utc = now_utc.date()
