@@ -26,6 +26,12 @@ competition:
   winner_points: 2
   goal_difference_points: 4
   exact_score_points: 6
+  # Group (qualifying) phase scoring. Points double in the knockout phase
+  # via knockout_multiplier (group 1/2/3 -> knockout 2/4/6).
+  group_stage_winner_points: 1
+  group_stage_goal_difference_points: 2
+  group_stage_exact_score_points: 3
+  knockout_multiplier: 2
 
 competitions:
   - code: "WC"

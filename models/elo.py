@@ -141,3 +141,63 @@ def expected_goals(
     diff_away = elo_away - (elo_home + ha)
 
     return base * math.exp(diff_home * sens), base * math.exp(diff_away * sens)
+
+
+def expected_goals_blended(
+    elo_home: float,
+    elo_away: float,
+    home_gf: int,
+    home_ga: int,
+    home_mp: int,
+    away_gf: int,
+    away_ga: int,
+    away_mp: int,
+) -> tuple[float, float]:
+    """Expected goals blending the Elo-only estimate with observed scoring stats.
+
+    Early in a tournament there is little data, so we lean on the Elo-derived
+    expectation.  Once both teams have played at least ``min_matches_for_stats``
+    matches, we blend in each team's actual attacking output against the
+    opponent's defensive record.
+
+    Stats-based xG uses the standard independent-Poisson normalisation: a team's
+    scoring expectation is (its goals/match) x (opponent's conceded/match) scaled
+    by the league-average ``base_lambda`` so that an average attack facing an
+    average defence yields ``base_lambda``.
+
+    Args:
+        elo_home: Current Elo of the home team.
+        elo_away: Current Elo of the away team.
+        home_gf: Home team's total goals scored so far.
+        home_ga: Home team's total goals conceded so far.
+        home_mp: Home team's matches played so far.
+        away_gf: Away team's total goals scored so far.
+        away_ga: Away team's total goals conceded so far.
+        away_mp: Away team's matches played so far.
+
+    Returns:
+        (lambda_home, lambda_away)
+    """
+    cfg = load_config()
+    xg_cfg = cfg["expected_goals"]
+    base = xg_cfg["base_lambda"]
+    min_mp = xg_cfg["min_matches_for_stats"]
+
+    elo_h, elo_a = expected_goals(elo_home, elo_away)
+
+    # Not enough data for either team -> fall back to the Elo-only estimate.
+    if home_mp < min_mp or away_mp < min_mp:
+        return elo_h, elo_a
+
+    home_attack = home_gf / home_mp
+    home_defense = home_ga / home_mp
+    away_attack = away_gf / away_mp
+    away_defense = away_ga / away_mp
+
+    stats_h = (home_attack * away_defense) / base if base else home_attack
+    stats_a = (away_attack * home_defense) / base if base else away_attack
+
+    # Equal blend of the Elo signal and the observed stats.
+    lam_home = 0.5 * elo_h + 0.5 * stats_h
+    lam_away = 0.5 * elo_a + 0.5 * stats_a
+    return lam_home, lam_away

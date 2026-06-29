@@ -18,6 +18,7 @@ import matplotlib.pyplot as plt
 import streamlit as st
 from sqlalchemy.orm import selectinload
 
+from config.loader import load_config
 from database.db import get_session, init_db
 from database.models import Match, Result, Team
 from models.confidence import calculate_confidence
@@ -34,6 +35,7 @@ st.set_page_config(
 init_db()
 
 UTC_OFFSET_HOURS = 2  # GMT+2
+_COMP_CFG = load_config()["competition"]
 
 _APP_THEME_CSS = """
 <style>
@@ -302,6 +304,83 @@ div[data-testid="stExpander"] {
     color: #465266;
     text-align: center;
     font-size: 0.92rem;
+}
+.mc-winprob {
+    margin: 12px 0 6px;
+}
+.mc-wp-track {
+    display: flex;
+    width: 100%;
+    height: 30px;
+    border-radius: 7px;
+    overflow: hidden;
+    border: 1px solid var(--mc-line);
+    box-shadow: 0 6px 16px rgba(31, 42, 68, 0.08);
+}
+.mc-wp-seg {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #ffffff;
+    font-size: 0.82rem;
+    font-weight: 800;
+    white-space: nowrap;
+    overflow: hidden;
+}
+.mc-wp-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    margin-top: 8px;
+    color: #475467;
+    font-size: 0.84rem;
+    font-weight: 650;
+}
+.mc-wp-legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.mc-wp-legend i {
+    width: 11px;
+    height: 11px;
+    border-radius: 3px;
+}
+.mc-ev {
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    margin: 4px 0 2px;
+}
+.mc-ev-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+.mc-ev-score {
+    flex: 0 0 54px;
+    color: var(--mc-indigo);
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+}
+.mc-ev-bar {
+    flex: 1 1 auto;
+    height: 22px;
+    border-radius: 6px;
+    background: rgba(31, 42, 68, 0.06);
+    overflow: hidden;
+}
+.mc-ev-fill {
+    height: 100%;
+    border-radius: 6px;
+    background: linear-gradient(90deg, var(--mc-matcha), #6f9a7c);
+}
+.mc-ev-val {
+    flex: 0 0 auto;
+    color: #344054;
+    font-size: 0.82rem;
+    font-weight: 650;
+    font-variant-numeric: tabular-nums;
 }
 .stButton > button {
     width: 100%;
@@ -629,11 +708,12 @@ def _load_history() -> tuple[list[dict], list[dict]]:
                 "away_goals": m.away_goals,
                 "pred_home": m.prediction.predicted_home_goals if m.prediction else None,
                 "pred_away": m.prediction.predicted_away_goals if m.prediction else None,
-                "manual_forecast": manual_forecasts.get(_manual_forecast_key(
+                "manual_forecast": (manual := manual_forecasts.get(_manual_forecast_key(
                     m.date,
                     m.home_team.name,
                     m.away_team.name,
-                )),
+                ))) and manual["forecast"],
+                "knockout": bool(manual and manual["knockout"]),
                 "retroactive": m.prediction is not None and m.result is None,
                 "points": m.result.points if m.result else None,
                 "exact": m.result.exact_score if m.result else False,
@@ -678,6 +758,62 @@ def _pct(v: float) -> str:
     return f"{v * 100:.1f}%"
 
 
+def _parse_score(text: str | None) -> tuple[int, int] | None:
+    """Parse a 'H-A' forecast string into (home, away) goals."""
+    if not text:
+        return None
+    m = re.match(r"^\s*(\d+)\s*[-–]\s*(\d+)\s*$", text)
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+
+def _match_points(pred: tuple[int, int], real: tuple[int, int], knockout: bool) -> int:
+    """Phase-aware points for a predicted score vs the real result.
+
+    Group phase: 1 (winner) / 2 (goal difference) / 3 (exact).
+    Knockout phase: doubled via knockout_multiplier -> 2 / 4 / 6.
+    """
+    win = _COMP_CFG.get("group_stage_winner_points", 1)
+    spread = _COMP_CFG.get("group_stage_goal_difference_points", 2)
+    exact = _COMP_CFG.get("group_stage_exact_score_points", 3)
+    mult = _COMP_CFG.get("knockout_multiplier", 2) if knockout else 1
+
+    ph, pa = pred
+    rh, ra = real
+    if ph == rh and pa == ra:
+        return exact * mult
+    if (ph - pa) == (rh - ra):
+        return spread * mult
+    if ((ph > pa) - (ph < pa)) == ((rh > ra) - (rh < ra)):
+        return win * mult
+    return 0
+
+
+def _points_badge(
+    pred: tuple[int, int] | None,
+    real: tuple[int, int] | None,
+    knockout: bool,
+) -> tuple[str, int]:
+    """Return (html_badge, points) coloured by outcome tier."""
+    if pred is None or real is None or real[0] is None:
+        return "<span style='color:#aaa'>—</span>", 0
+    pts = _match_points(pred, real, knockout)
+    ph, pa = pred
+    rh, ra = real
+    if ph == rh and pa == ra:
+        color = "#2ecc71"
+    elif (ph - pa) == (rh - ra):
+        color = "#3498db"
+    elif ((ph > pa) - (ph < pa)) == ((rh > ra) - (rh < ra)):
+        color = "#f39c12"
+    else:
+        color = "#e74c3c"
+    badge = (
+        f"<span style='background:{color};color:white;padding:2px 9px;"
+        f"border-radius:4px;font-weight:bold'>+{pts}</span>"
+    )
+    return badge, pts
+
+
 def _local_dt(dt: datetime) -> datetime:
     return dt + timedelta(hours=UTC_OFFSET_HOURS)
 
@@ -717,8 +853,24 @@ def _manual_forecast_key(dt: datetime, home_name: str, away_name: str) -> tuple:
     )
 
 
-def _load_manual_forecasts() -> dict[tuple, str]:
-    """Parse score.md forecasts keyed by local date/time and teams."""
+_STAGE_RE = re.compile(
+    r"^(group stage|round of \d+|quarter[- ]?finals?|semi[- ]?finals?|final|third[- ]place.*)$",
+    re.IGNORECASE,
+)
+
+
+def _stage_is_knockout(stage: str | None) -> bool:
+    """Group/qualifying matches score single; everything else doubles."""
+    return bool(stage) and "group" not in stage.lower()
+
+
+def _load_manual_forecasts() -> dict[tuple, dict]:
+    """Parse score.md forecasts keyed by local date/time and teams.
+
+    Returns a dict mapping match key -> {"forecast": str, "knockout": bool}.
+    The stage label that precedes each match in score.md drives the knockout
+    flag (used for phase-aware, doubled scoring).
+    """
     score_path = Path(__file__).parent.parent / "score.md"
     if not score_path.exists():
         return {}
@@ -729,11 +881,16 @@ def _load_manual_forecasts() -> dict[tuple, str]:
         if line.strip()
     ]
 
-    forecasts: dict[tuple, str] = {}
+    forecasts: dict[tuple, dict] = {}
     date_re = re.compile(r"^(\d{1,2}) Jun \| (\d{1,2}):(\d{2})$")
     score_re = re.compile(r"^\d+\-\d+$")
+    current_stage: str | None = None
 
     for idx, line in enumerate(lines):
+        if _STAGE_RE.match(line):
+            current_stage = line
+            continue
+
         if line != "Your forecast" or idx < 3 or idx + 3 >= len(lines):
             continue
 
@@ -760,7 +917,10 @@ def _load_manual_forecasts() -> dict[tuple, str]:
             _normalize_team_name(home_name),
             _normalize_team_name(away_name),
         )
-        forecasts[key] = forecast
+        forecasts[key] = {
+            "forecast": forecast,
+            "knockout": _stage_is_knockout(current_stage),
+        }
 
     return forecasts
 
@@ -885,42 +1045,44 @@ def _display_fig(fig: plt.Figure) -> None:
 
 
 def _win_prob_bar(probs: dict, home_name: str, away_name: str, key: str = "") -> None:
-    """Compact horizontal stacked bar showing win/draw/loss probabilities."""
-    fig, ax = plt.subplots(figsize=(9, 2.2))
-    values = [probs["home"], probs["draw"], probs["away"]]
-    labels = [f"🏠 {home_name}", "🤝 Draw", f"✈️ {away_name}"]
-    colors = [_COLORS["home"], _COLORS["draw"], _COLORS["away"]]
-    left = 0.0
-    for value, label, color in zip(values, labels, colors):
-        ax.barh([0], [value], left=left, color=color, height=0.46)
-        ax.text(left + value / 2, 0, _pct(value), ha="center", va="center", color="white", fontsize=10, fontweight="bold")
-        left += value
-    ax.set_xlim(0, 1)
-    ax.set_yticks([])
-    ax.set_xticks([])
-    ax.set_frame_on(False)
-    ax.set_title(f"{labels[0]}   {labels[1]}   {labels[2]}", fontsize=10, color="#475467", pad=10)
-    _display_fig(fig)
+    """Crisp horizontal stacked bar showing win/draw/loss probabilities (HTML/CSS)."""
+    segments = [
+        (probs["home"], _COLORS["home"]),
+        (probs["draw"], _COLORS["draw"]),
+        (probs["away"], _COLORS["away"]),
+    ]
+    bar = "".join(
+        f'<div class="mc-wp-seg" style="width:{value * 100:.2f}%;background:{color}">'
+        f'{_pct(value) if value >= 0.07 else ""}</div>'
+        for value, color in segments
+    )
+    legend = (
+        f'<span><i style="background:{_COLORS["home"]}"></i>🏠 {home_name}</span>'
+        f'<span><i style="background:{_COLORS["draw"]}"></i>🤝 Draw</span>'
+        f'<span><i style="background:{_COLORS["away"]}"></i>✈️ {away_name}</span>'
+    )
+    st.markdown(
+        f'<div class="mc-winprob"><div class="mc-wp-track">{bar}</div>'
+        f'<div class="mc-wp-legend">{legend}</div></div>',
+        unsafe_allow_html=True,
+    )
 
 
 def _top5_ev_bar(top: list[dict], key: str = "") -> None:
-    """Horizontal bar of top-5 predicted scores ranked by Expected Value."""
-    fig, ax = plt.subplots(figsize=(9, 3.0))
-    ordered = list(reversed(top))
-    scores = [f"{s['home']}–{s['away']}" for s in ordered]
-    evs = [s["ev"] for s in ordered]
-    probs = [s["probability"] for s in ordered]
-    y_pos = np.arange(len(scores))
-    ax.barh(y_pos, evs, color=_COLORS["bar"])
-    ax.set_yticks(y_pos)
-    ax.set_yticklabels(scores)
-    for y, ev, prob in zip(y_pos, evs, probs):
-        ax.text(ev + 0.02, y, f"EV {ev:.2f}  ·  {_pct(prob)}", va="center", ha="left", fontsize=9, color="#344054")
-    ax.set_xlabel("Expected Value")
-    ax.grid(axis="x", alpha=0.2)
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
-    _display_fig(fig)
+    """Horizontal bars of top-5 predicted scores ranked by Expected Value (HTML/CSS)."""
+    max_ev = max((s["ev"] for s in top), default=0)
+    scale = max_ev if max_ev > 0 else 1.0
+    rows = "".join(
+        '<div class="mc-ev-row">'
+        f'<span class="mc-ev-score">{s["home"]}–{s["away"]}</span>'
+        '<div class="mc-ev-bar">'
+        f'<div class="mc-ev-fill" style="width:{max(s["ev"] / scale * 100, 1.5) if s["ev"] > 0 else 1.5:.1f}%"></div>'
+        '</div>'
+        f'<span class="mc-ev-val">EV {s["ev"]:.2f} · {_pct(s["probability"])}</span>'
+        '</div>'
+        for s in top
+    )
+    st.markdown(f'<div class="mc-ev">{rows}</div>', unsafe_allow_html=True)
 
 
 def _render_heatmaps(
@@ -1057,51 +1219,46 @@ def render_upcoming() -> None:
 # ------------------------------------------------------------------ #
 
 
-def _pts_badge(
-    pts: int | None,
-    exact: bool = False,
-    diff_ok: bool = False,
-    winner_ok: bool = False,
-    retroactive: bool = False,
-) -> str:
-    if pts is None:
-        return "<span style='color:#aaa'>—</span>"
-    if exact:
-        color = "#2ecc71"
-    elif diff_ok:
-        color = "#3498db"
-    elif winner_ok:
-        color = "#f39c12"
-    else:
-        color = "#e74c3c"
-    label = f"+{pts}" if pts else "0"
-    suffix = "&nbsp;<sup style='font-size:0.7em;color:#aaa'>retro</sup>" if retroactive else ""
-    return (
-        f"<span style='background:{color};color:white;padding:2px 9px;"
-        f"border-radius:4px;font-weight:bold'>{label}</span>{suffix}"
-    )
-
-
 def render_history() -> None:
     matches, results = _load_history()
     manual_total_pts = _load_manual_points_total()
 
     scored = [r for r in results]
-    total_pts = sum(r["points"] for r in scored)
     n_exact = sum(1 for r in scored if r["exact"])
     n_diff  = sum(1 for r in scored if r["diff_ok"])
     n_win   = sum(1 for r in scored if r["winner_ok"])
     n_wrong = len(scored) - n_exact - n_diff - n_win
+
+    # ── Phase-aware tallies (group 1/2/3, knockout doubled 2/4/6) ────
+    # Pre-seed each match's editable forecast from score.md once per session.
+    for m in matches:
+        skey = f"fc_{m['id']}"
+        if skey not in st.session_state:
+            st.session_state[skey] = m["manual_forecast"] or ""
+
+    model_total = 0
+    your_total = 0
+    for m in matches:
+        real = (m["home_goals"], m["away_goals"])
+        if real[0] is None:
+            continue
+        if m["pred_home"] is not None:
+            model_total += _match_points(
+                (m["pred_home"], m["pred_away"]), real, m["knockout"]
+            )
+        your = _parse_score(st.session_state.get(f"fc_{m['id']}", ""))
+        if your is not None:
+            your_total += _match_points(your, real, m["knockout"])
 
     # ── Summary metrics ──────────────────────────────────────────────
     st.markdown("### Summary")
     c1, c2, c3, c4, c5, c6 = st.columns(6)
     c1.metric("WC Matches Played", len(matches))
     c2.metric("Model Predictions", len(scored))
-    c3.metric("Model Points", total_pts)
-    c4.metric("Avg pts / match", f"{total_pts/len(scored):.2f}" if scored else "—")
+    c3.metric("Model Points", model_total)
+    c4.metric("Your Points", your_total)
     c5.metric("Exact Scores", n_exact)
-    c6.metric("Points Anto :)", manual_total_pts if manual_total_pts is not None else "—")
+    c6.metric("Points Anto (score.md)", manual_total_pts if manual_total_pts is not None else "—")
 
     if scored:
         # ── Breakdown bar ────────────────────────────────────────────
@@ -1148,36 +1305,44 @@ def render_history() -> None:
     st.divider()
 
     # ── Full match timeline ───────────────────────────────────────────
-    st.markdown("### WC 2026 — All Matches: Real Score vs Prediction")
+    st.markdown("### WC 2026 — Real vs Model vs You")
     st.caption(
-        "Model Prediction comes from the app database. My Forecast is parsed from `score.md`."
+        "Type your forecast (e.g. `2-1`) per match — it pre-fills from `score.md`. "
+        "Points are phase-aware: group 1 / 2 / 3, knockout doubles to 2 / 4 / 6 (🏆)."
     )
 
-    cols = st.columns([1, 3, 1, 1, 1, 0.9])
+    widths = [1.1, 2.6, 0.8, 0.9, 0.8, 1.2, 0.8]
+    header = st.columns(widths)
     for h, label in zip(
-        cols,
-        ["Date", "Match", "Real Score", "Model Prediction", "My Forecast", "Model Pts"],
+        header,
+        ["Date", "Match", "Real", "Model", "Model Pts", "Your Forecast", "Your Pts"],
     ):
         h.markdown(f"**{label}**")
     st.markdown("<hr style='margin:4px 0'>", unsafe_allow_html=True)
 
     for m in matches:
+        real = (m["home_goals"], m["away_goals"])
         real_str = f"{m['home_goals']}–{m['away_goals']}"
-        pred_str = (
-            f"{m['pred_home']}–{m['pred_away']}"
-            if m["pred_home"] is not None else "—"
-        )
-        manual_forecast = m["manual_forecast"] or "—"
-        is_retro = m["pred_home"] is not None and m["points"] is None
-        pts_html = _pts_badge(m["points"], retroactive=is_retro)
+        pred = (m["pred_home"], m["pred_away"]) if m["pred_home"] is not None else None
+        pred_str = f"{m['pred_home']}–{m['pred_away']}" if pred else "—"
+        model_badge, _ = _points_badge(pred, real, m["knockout"])
 
-        row = st.columns([1, 3, 1, 1, 1, 0.9])
+        row = st.columns(widths, vertical_alignment="center")
         row[0].markdown(_local_dt(m["date"]).strftime("%d %b %H:%M"))
-        row[1].markdown(f"**{m['home_name']}** vs **{m['away_name']}**")
+        tag = " 🏆" if m["knockout"] else ""
+        row[1].markdown(f"**{m['home_name']}** vs **{m['away_name']}**{tag}")
         row[2].markdown(f"`{real_str}`")
         row[3].markdown(f"`{pred_str}`")
-        row[4].markdown(f"`{manual_forecast}`")
-        row[5].markdown(pts_html, unsafe_allow_html=True)
+        row[4].markdown(model_badge, unsafe_allow_html=True)
+        row[5].text_input(
+            "forecast",
+            key=f"fc_{m['id']}",
+            label_visibility="collapsed",
+            placeholder="2-1",
+        )
+        your = _parse_score(st.session_state.get(f"fc_{m['id']}", ""))
+        your_badge, _ = _points_badge(your, real, m["knockout"])
+        row[6].markdown(your_badge, unsafe_allow_html=True)
 
 
 # ------------------------------------------------------------------ #
