@@ -142,6 +142,18 @@ _APP_THEME_CSS = """
     color: var(--mc-indigo);
     font-weight: 900;
 }
+.mc-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #1f9d57;
+    box-shadow: 0 0 0 3px rgba(31, 157, 87, 0.18);
+    animation: mc-pulse 2.4s ease-in-out infinite;
+}
+@keyframes mc-pulse {
+    0%, 100% { box-shadow: 0 0 0 3px rgba(31, 157, 87, 0.18); }
+    50%      { box-shadow: 0 0 0 6px rgba(31, 157, 87, 0.06); }
+}
 .mc-strip {
     display: flex;
     align-items: center;
@@ -888,8 +900,25 @@ def _refresh_data_pipeline() -> None:
     st.success("Données rafraîchies. Le moteur est à jour.")
 
 
+@st.cache_data(ttl=600, show_spinner=False)
+def _data_last_updated() -> datetime | None:
+    """When the data was last refreshed — the most recent Team.last_update."""
+    with get_session() as s:
+        team = (
+            s.query(Team)
+            .filter(Team.last_update.isnot(None))
+            .order_by(Team.last_update.desc())
+            .first()
+        )
+        return team.last_update if team else None
+
+
 def _render_app_header() -> None:
-    last_refresh = st.session_state.get("last_data_refresh", "En attente de refresh")
+    updated = _data_last_updated()
+    if updated is not None:
+        last_refresh = _local_dt(updated).strftime("%d %b · %H:%M")
+    else:
+        last_refresh = st.session_state.get("last_data_refresh", "—")
     st.markdown(
         f"""
 <div class="mc-hero">
@@ -901,7 +930,7 @@ def _render_app_header() -> None:
       <span class="mc-chip">Modèle <strong>EV-first</strong></span>
       <span class="mc-chip">Compétition <strong>World Cup 2026</strong></span>
       <span class="mc-chip">Fuseau <strong>GMT+2</strong></span>
-      <span class="mc-chip">Maj <strong>{last_refresh}</strong></span>
+      <span class="mc-chip"><span class="mc-dot"></span>Données à jour <strong>{last_refresh}</strong></span>
     </div>
   </div>
 </div>
