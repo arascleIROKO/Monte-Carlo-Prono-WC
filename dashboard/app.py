@@ -11,8 +11,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-import time
-
 import numpy as np
 import matplotlib.pyplot as plt
 import streamlit as st
@@ -585,68 +583,12 @@ _inject_app_theme()
 _render_roaming_cat()
 
 # ------------------------------------------------------------------ #
-# Startup loader — shown once per session                             #
-# ------------------------------------------------------------------ #
-
-_LOADER_STEPS = [
-    ("🔍", "Analyse des données WC 2026..."),
-    ("📊", "Recalcul des ratings Elo..."),
-    ("⚽", "Distribution de Poisson en cours..."),
-    ("💡", "Calcul des Expected Values..."),
-    ("✅", "Prêt !"),
-]
-
-_LOADER_CSS = """
-<style>
-@keyframes spin {
-    0%   { transform: rotate(0deg);   }
-    100% { transform: rotate(360deg); }
-}
-@keyframes fadein {
-    from { opacity: 0; transform: translateY(8px); }
-    to   { opacity: 1; transform: translateY(0);   }
-}
-.cat  { display:inline-block; animation: spin 0.7s linear infinite; font-size:5em; }
-.step { animation: fadein 0.4s ease; font-size:1.1em; margin:6px 0; }
-.wrap { display:flex; flex-direction:column; align-items:center;
-        justify-content:center; height:70vh; text-align:center; }
-</style>
-"""
-
-
-def _loader_html(step_icon: str, step_text: str, done: list[str]) -> str:
-    done_html = "".join(
-        f"<p class='step' style='color:#2ecc71'>✔ {s}</p>" for s in done
-    )
-    return f"""
-{_LOADER_CSS}
-<div class='wrap'>
-  <div class='cat'>🐱</div>
-  <h2 style='margin:20px 0 4px'>World Cup 2026 — Prediction Engine</h2>
-  {done_html}
-  <p class='step' style='color:#f39c12'>{step_icon} {step_text}</p>
-</div>
-"""
-
-
-if "loader_shown" not in st.session_state:
-    placeholder = st.empty()
-    done: list[str] = []
-    delay = 10 / len(_LOADER_STEPS)
-    for icon, text in _LOADER_STEPS:
-        placeholder.markdown(_loader_html(icon, text, done), unsafe_allow_html=True)
-        time.sleep(delay)
-        done.append(text)
-    placeholder.empty()
-    st.session_state["loader_shown"] = True
-
-
-# ------------------------------------------------------------------ #
 # Data loaders — return plain dicts, no SQLAlchemy objects outside    #
 # the session context.                                                #
 # ------------------------------------------------------------------ #
 
 
+@st.cache_data(ttl=600, show_spinner=False)
 def _load_upcoming() -> list[dict]:
     with get_session() as s:
         rows = (
@@ -679,6 +621,7 @@ def _load_upcoming() -> list[dict]:
         ]
 
 
+@st.cache_data(ttl=600, show_spinner=False)
 def _load_history() -> tuple[list[dict], list[dict]]:
     """Return (wc_matches, all_results) as plain dicts."""
     manual_forecasts = _load_manual_forecasts()
@@ -734,6 +677,7 @@ def _load_history() -> tuple[list[dict], list[dict]]:
         return match_dicts, result_dicts
 
 
+@st.cache_data(ttl=600, show_spinner=False)
 def _load_teams() -> list[dict]:
     with get_session() as s:
         teams = s.query(Team).order_by(Team.elo.desc()).all()
@@ -864,6 +808,7 @@ def _stage_is_knockout(stage: str | None) -> bool:
     return bool(stage) and "group" not in stage.lower()
 
 
+@st.cache_data(ttl=600, show_spinner=False)
 def _load_manual_forecasts() -> dict[tuple, dict]:
     """Parse score.md forecasts keyed by local date/time and teams.
 
@@ -925,6 +870,7 @@ def _load_manual_forecasts() -> dict[tuple, dict]:
     return forecasts
 
 
+@st.cache_data(ttl=600, show_spinner=False)
 def _load_manual_points_total() -> int | None:
     """Return the total points shown in score.md, including group questions."""
     score_path = Path(__file__).parent.parent / "score.md"
@@ -939,6 +885,7 @@ def _load_manual_points_total() -> int | None:
     return sum(points)
 
 
+@st.cache_data(ttl=600, show_spinner=False)
 def _compute_match(m: dict) -> dict:
     """Run the full model for one match dict and return display-ready values."""
     lam_h, lam_a = expected_goals_blended(
@@ -979,6 +926,8 @@ def _refresh_data_pipeline() -> None:
     with st.spinner("Mise à jour des matchs, ratings Elo et prédictions..."):
         run_pipeline()
 
+    # Drop cached DB queries / computations so the new data is picked up.
+    st.cache_data.clear()
     st.session_state["last_data_refresh"] = datetime.now().strftime("%d/%m/%Y %H:%M")
     st.success("Données rafraîchies. Le moteur est à jour.")
 
@@ -1183,6 +1132,7 @@ def _match_card(m: dict, calc: dict) -> None:
         )
 
 
+@st.fragment
 def render_upcoming() -> None:
     matches = _load_upcoming()
 
@@ -1219,6 +1169,7 @@ def render_upcoming() -> None:
 # ------------------------------------------------------------------ #
 
 
+@st.fragment
 def render_history() -> None:
     matches, results = _load_history()
     manual_total_pts = _load_manual_points_total()
@@ -1350,6 +1301,7 @@ def render_history() -> None:
 # ------------------------------------------------------------------ #
 
 
+@st.fragment
 def render_elo() -> None:
     teams = _load_teams()
 
