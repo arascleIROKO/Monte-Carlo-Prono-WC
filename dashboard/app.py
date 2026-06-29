@@ -1086,13 +1086,17 @@ def _match_card(m: dict, calc: dict) -> None:
 
 @st.fragment
 def render_upcoming() -> None:
-    matches = _load_upcoming()
+    now_utc = datetime.now(tz=timezone.utc).replace(tzinfo=None)
+    # Only show matches whose kickoff is still ahead — a match that has
+    # already started but isn't marked FINISHED yet (stale status) should not
+    # linger under "Tonight".
+    matches = [m for m in _load_upcoming() if m["date"] >= now_utc]
 
     if not matches:
-        st.info("No upcoming matches. Use the Refresh data button to update the pipeline.")
+        st.info("No upcoming matches right now. Hit Refresh data once the next fixtures are in.")
         return
 
-    today_utc = datetime.now(tz=timezone.utc).date()
+    today_utc = now_utc.date()
 
     groups: dict = defaultdict(list)
     for m in matches:
