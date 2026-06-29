@@ -34,29 +34,29 @@ init_db()
 
 UTC_OFFSET_HOURS = 2  # GMT+2
 _COMP_CFG = load_config()["competition"]
+_KNOCKOUT_START = datetime.strptime(
+    _COMP_CFG.get("knockout_start_date", "2026-06-28"), "%Y-%m-%d"
+).date()
 
 _APP_THEME_CSS = """
 <style>
 :root {
-    --mc-ink: #121722;
-    --mc-ink-2: #1f2a44;
-    --mc-muted: #667085;
-    --mc-paper: #fbfaf5;
-    --mc-card: rgba(255, 255, 255, 0.86);
-    --mc-line: rgba(18, 23, 34, 0.11);
-    --mc-indigo: #1f2a44;
-    --mc-vermilion: #d83a2e;
-    --mc-matcha: #5c7f67;
+    --mc-ink: #1b2330;
+    --mc-ink-2: #14213b;
+    --mc-muted: #5f6b78;
+    --mc-paper: #f5f7fa;
+    --mc-card: #ffffff;
+    --mc-line: #e4e8ee;
+    --mc-indigo: #1b2a4a;
+    --mc-indigo-d: #14213b;
+    --mc-vermilion: #c2502f;
+    --mc-matcha: #1b2a4a;
     --mc-gold: #b8892f;
+    --mc-shadow: 0 1px 2px rgba(27, 35, 48, 0.04), 0 8px 24px rgba(27, 35, 48, 0.06);
 }
 .stApp {
     color: var(--mc-ink);
-    background:
-        linear-gradient(90deg, rgba(31, 42, 68, 0.035) 1px, transparent 1px),
-        linear-gradient(180deg, rgba(31, 42, 68, 0.028) 1px, transparent 1px),
-        linear-gradient(135deg, rgba(216, 58, 46, 0.06), transparent 34%),
-        linear-gradient(180deg, #fbfaf5 0%, #f2f5f1 48%, #eef3f7 100%);
-    background-size: 38px 38px, 38px 38px, auto, auto;
+    background: var(--mc-paper);
     font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 .block-container {
@@ -65,60 +65,12 @@ _APP_THEME_CSS = """
     padding-bottom: 4rem;
 }
 .mc-hero {
-    position: relative;
-    overflow: hidden;
-    display: flex;
-    align-items: center;
-    gap: 22px;
-    min-height: 178px;
-    padding: 28px 32px;
-    margin: 0 0 14px;
+    padding: 30px 32px;
+    margin: 0 0 18px;
     border: 1px solid var(--mc-line);
-    border-radius: 8px;
-    background:
-        linear-gradient(90deg, rgba(255, 255, 255, 0.93), rgba(255, 255, 255, 0.72)),
-        linear-gradient(135deg, rgba(31, 42, 68, 0.06), rgba(216, 58, 46, 0.035));
-    box-shadow: 0 22px 60px rgba(31, 42, 68, 0.13);
-    backdrop-filter: blur(18px);
-}
-.mc-hero::before {
-    content: "";
-    position: absolute;
-    right: 42px;
-    top: 22px;
-    width: 104px;
-    height: 104px;
-    border-radius: 50%;
-    background: var(--mc-vermilion);
-    opacity: 0.12;
-}
-.mc-hero::after {
-    content: "";
-    position: absolute;
-    right: -56px;
-    bottom: -84px;
-    width: 340px;
-    height: 210px;
-    border-top: 1px solid rgba(31, 42, 68, 0.15);
-    transform: rotate(-11deg);
-}
-.mc-mon {
-    position: relative;
-    z-index: 1;
-    display: grid;
-    place-items: center;
-    flex: 0 0 92px;
-    width: 92px;
-    height: 92px;
-    border: 1px solid rgba(216, 58, 46, 0.28);
-    border-radius: 50%;
-    background:
-        linear-gradient(180deg, rgba(216, 58, 46, 0.10), rgba(255, 255, 255, 0.72)),
-        #fffdf8;
-    color: var(--mc-vermilion);
-    font-size: 2.35rem;
-    font-weight: 900;
-    box-shadow: inset 0 0 0 8px rgba(216, 58, 46, 0.045);
+    border-radius: 14px;
+    background: var(--mc-card);
+    box-shadow: var(--mc-shadow);
 }
 .mc-hero-copy {
     position: relative;
@@ -237,13 +189,11 @@ h3 {
     letter-spacing: 0;
 }
 div[data-testid="stMetric"] {
-    padding: 16px 17px;
+    padding: 16px 18px;
     border: 1px solid var(--mc-line);
-    border-radius: 8px;
-    background:
-        linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(255, 255, 255, 0.72)),
-        var(--mc-paper);
-    box-shadow: 0 12px 32px rgba(31, 42, 68, 0.07);
+    border-radius: 12px;
+    background: var(--mc-card);
+    box-shadow: var(--mc-shadow);
 }
 div[data-testid="stMetric"] label {
     color: var(--mc-muted);
@@ -251,11 +201,9 @@ div[data-testid="stMetric"] label {
 }
 div[data-testid="stVerticalBlockBorderWrapper"] {
     border-color: var(--mc-line);
-    border-radius: 8px;
-    background:
-        linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(255, 255, 255, 0.78)),
-        var(--mc-paper);
-    box-shadow: 0 16px 42px rgba(31, 42, 68, 0.08);
+    border-radius: 12px;
+    background: var(--mc-card);
+    box-shadow: var(--mc-shadow);
 }
 div[data-testid="stExpander"] {
     border: 1px solid var(--mc-line);
@@ -286,17 +234,16 @@ div[data-testid="stExpander"] {
     text-transform: uppercase;
 }
 .mc-score-pick {
-    margin: 8px 0 4px;
+    margin: 8px 0 6px;
     padding: 14px 8px;
-    border: 1px solid rgba(216, 58, 46, 0.16);
-    border-radius: 8px;
-    background:
-        linear-gradient(135deg, rgba(216, 58, 46, 0.08), rgba(31, 42, 68, 0.04)),
-        rgba(255, 255, 255, 0.72);
+    border: 1px solid var(--mc-line);
+    border-radius: 12px;
+    background: var(--mc-paper);
     color: var(--mc-indigo);
-    font-size: 2.65rem;
-    font-weight: 950;
+    font-size: 2.4rem;
+    font-weight: 800;
     text-align: center;
+    font-variant-numeric: tabular-nums;
 }
 .mc-meta-line {
     color: #465266;
@@ -371,7 +318,7 @@ div[data-testid="stExpander"] {
 .mc-ev-fill {
     height: 100%;
     border-radius: 6px;
-    background: linear-gradient(90deg, var(--mc-matcha), #6f9a7c);
+    background: var(--mc-matcha);
 }
 .mc-ev-val {
     flex: 0 0 auto;
@@ -382,23 +329,23 @@ div[data-testid="stExpander"] {
 }
 .stButton > button {
     width: 100%;
-    min-height: 50px;
-    border: 0;
-    border-radius: 8px;
-    background:
-        linear-gradient(135deg, var(--mc-vermilion) 0%, #a9261f 46%, var(--mc-indigo) 100%);
+    min-height: 44px;
+    border: 1px solid var(--mc-indigo);
+    border-radius: 10px;
+    background: var(--mc-indigo);
     color: #ffffff;
-    font-weight: 900;
-    box-shadow: 0 14px 28px rgba(216, 58, 46, 0.22);
-    transition: transform 120ms ease, box-shadow 120ms ease;
+    font-weight: 600;
+    box-shadow: none;
+    transition: background 120ms ease, border-color 120ms ease;
 }
 .stButton > button:hover {
-    transform: translateY(-1px);
+    background: var(--mc-indigo-d);
+    border-color: var(--mc-indigo-d);
     color: #ffffff;
-    box-shadow: 0 18px 36px rgba(216, 58, 46, 0.30);
 }
 .stButton > button:active {
-    transform: translateY(0);
+    background: var(--mc-indigo-d);
+    color: #ffffff;
 }
 div[data-testid="stDataFrame"],
 div[data-testid="stTable"] {
@@ -435,136 +382,110 @@ hr {
 _ROAMING_CAT_HTML = """
 <style>
 @keyframes mc-cat-roam {
-    0%   { left: -104px; top: 72vh; transform: translateY(0) scaleX(1) rotate(0deg); }
-    12%  { left: 12vw;   top: 78vh; transform: translateY(-2px) scaleX(1) rotate(-1deg); }
-    24%  { left: 30vw;   top: 18vh; transform: translateY(2px) scaleX(1) rotate(2deg); }
-    38%  { left: 56vw;   top: 25vh; transform: translateY(-3px) scaleX(1) rotate(-1deg); }
-    49%  { left: calc(100vw - 78px); top: 62vh; transform: translateY(1px) scaleX(1) rotate(0deg); }
-    50%  { left: calc(100vw - 78px); top: 62vh; transform: translateY(1px) scaleX(-1) rotate(0deg); }
-    62%  { left: 76vw;   top: 80vh; transform: translateY(-2px) scaleX(-1) rotate(1deg); }
-    74%  { left: 47vw;   top: 38vh; transform: translateY(2px) scaleX(-1) rotate(-2deg); }
-    88%  { left: 18vw;   top: 86vh; transform: translateY(-3px) scaleX(-1) rotate(1deg); }
-    99%  { left: -104px; top: 72vh; transform: translateY(0) scaleX(-1) rotate(0deg); }
-    100% { left: -104px; top: 72vh; transform: translateY(0) scaleX(1) rotate(0deg); }
+    0%   { left: -110px; top: 74vh; transform: translateY(0) scaleX(1); }
+    11%  { left: 14vw;   top: 80vh; transform: translateY(-2px) scaleX(1); }
+    23%  { left: 32vw;   top: 20vh; transform: translateY(2px) scaleX(1); }
+    37%  { left: 58vw;   top: 26vh; transform: translateY(-2px) scaleX(1); }
+    49%  { left: calc(100vw - 80px); top: 64vh; transform: translateY(1px) scaleX(1); }
+    50%  { left: calc(100vw - 80px); top: 64vh; transform: translateY(1px) scaleX(-1); }
+    62%  { left: 74vw;   top: 82vh; transform: translateY(-2px) scaleX(-1); }
+    75%  { left: 46vw;   top: 40vh; transform: translateY(2px) scaleX(-1); }
+    88%  { left: 18vw;   top: 86vh; transform: translateY(-2px) scaleX(-1); }
+    99%  { left: -110px; top: 74vh; transform: translateY(0) scaleX(-1); }
+    100% { left: -110px; top: 74vh; transform: translateY(0) scaleX(1); }
 }
-@keyframes mc-cat-tail {
-    0%, 100% { transform: rotate(18deg); }
-    50%      { transform: rotate(38deg); }
-}
-@keyframes mc-cat-step {
-    0%, 100% { transform: rotate(12deg); }
-    50%      { transform: rotate(-16deg); }
-}
+@keyframes mc-cat-tail { 0%, 100% { transform: rotate(16deg); } 50% { transform: rotate(40deg); } }
+@keyframes mc-cat-step { 0%, 100% { transform: rotate(13deg); } 50% { transform: rotate(-17deg); } }
+@keyframes mc-cat-blink { 0%, 92%, 100% { transform: scaleY(1); } 96% { transform: scaleY(0.1); } }
 .mc-roaming-cat {
     position: fixed;
-    width: 68px;
-    height: 42px;
-    z-index: 999999;
+    width: 72px;
+    height: 46px;
+    z-index: 9000;
     pointer-events: none;
-    animation: mc-cat-roam 30s linear infinite;
-    filter: drop-shadow(0 8px 12px rgba(0, 0, 0, 0.22));
+    animation: mc-cat-roam 34s linear infinite;
+    filter: drop-shadow(0 8px 10px rgba(20, 33, 59, 0.20));
+    --fur: #2b3340;
 }
 .mc-roaming-cat .body {
-    position: absolute;
-    left: 13px;
-    bottom: 8px;
-    width: 43px;
-    height: 24px;
-    border-radius: 18px 18px 12px 12px;
-    background: #262a31;
+    position: absolute; left: 14px; bottom: 8px;
+    width: 44px; height: 24px;
+    border-radius: 16px 20px 12px 12px;
+    background: var(--fur);
 }
 .mc-roaming-cat .head {
-    position: absolute;
-    left: 0;
-    bottom: 18px;
-    width: 28px;
-    height: 24px;
-    border-radius: 50%;
-    background: #262a31;
+    position: absolute; left: 0; bottom: 16px;
+    width: 30px; height: 26px;
+    border-radius: 50% 50% 48% 48%;
+    background: var(--fur);
 }
 .mc-roaming-cat .head::before,
 .mc-roaming-cat .head::after {
-    content: "";
-    position: absolute;
-    top: -7px;
-    width: 0;
-    height: 0;
-    border-left: 7px solid transparent;
-    border-right: 7px solid transparent;
-    border-bottom: 13px solid #262a31;
+    content: ""; position: absolute; top: -8px;
+    width: 0; height: 0;
+    border-left: 7px solid transparent; border-right: 7px solid transparent;
+    border-bottom: 14px solid var(--fur);
 }
-.mc-roaming-cat .head::before { left: 2px; transform: rotate(-22deg); }
-.mc-roaming-cat .head::after  { right: 1px; transform: rotate(22deg); }
+.mc-roaming-cat .head::before { left: 1px; transform: rotate(-20deg); }
+.mc-roaming-cat .head::after  { right: 1px; transform: rotate(20deg); }
 .mc-roaming-cat .eye {
-    position: absolute;
-    top: 9px;
-    width: 4px;
-    height: 4px;
-    border-radius: 50%;
-    background: #f6d45f;
+    position: absolute; top: 9px; width: 4px; height: 5px;
+    border-radius: 50%; background: #f6d45f;
+    animation: mc-cat-blink 5.5s ease-in-out infinite;
 }
 .mc-roaming-cat .eye.left { left: 7px; }
-.mc-roaming-cat .eye.right { right: 7px; }
+.mc-roaming-cat .eye.right { left: 17px; }
+.mc-roaming-cat .nose {
+    position: absolute; top: 15px; left: 12px;
+    width: 4px; height: 3px; border-radius: 50%;
+    background: #e29a9a;
+}
+.mc-roaming-cat .whisker {
+    position: absolute; top: 16px; left: -6px;
+    width: 14px; height: 1px; background: rgba(255, 255, 255, 0.55);
+}
+.mc-roaming-cat .whisker.b { top: 19px; transform: rotate(8deg); }
 .mc-roaming-cat .collar {
-    position: absolute;
-    left: 4px;
-    bottom: 18px;
-    width: 22px;
-    height: 4px;
-    border-radius: 999px;
-    background: #d83a2e;
+    position: absolute; left: 3px; bottom: 14px;
+    width: 24px; height: 4px; border-radius: 999px;
+    background: var(--mc-vermilion, #c2502f);
 }
 .mc-roaming-cat .collar::after {
-    content: "";
-    position: absolute;
-    left: 9px;
-    top: 3px;
-    width: 5px;
-    height: 5px;
-    border-radius: 50%;
-    background: #b8892f;
+    content: ""; position: absolute; left: 10px; top: 3px;
+    width: 5px; height: 5px; border-radius: 50%; background: #b8892f;
 }
 .mc-roaming-cat .tail {
-    position: absolute;
-    right: 0;
-    bottom: 23px;
-    width: 24px;
-    height: 9px;
-    border-radius: 999px;
-    background: #262a31;
-    transform-origin: 2px 6px;
+    position: absolute; right: -2px; bottom: 22px;
+    width: 26px; height: 9px; border-radius: 999px;
+    background: var(--fur);
+    transform-origin: 4px 6px;
     animation: mc-cat-tail 1.1s ease-in-out infinite;
 }
 .mc-roaming-cat .paw {
-    position: absolute;
-    bottom: 0;
-    width: 7px;
-    height: 13px;
-    border-radius: 999px;
-    background: #262a31;
+    position: absolute; bottom: 0; width: 7px; height: 13px;
+    border-radius: 999px; background: var(--fur);
     transform-origin: top center;
     animation: mc-cat-step 0.48s ease-in-out infinite;
 }
-.mc-roaming-cat .paw.one { left: 21px; }
-.mc-roaming-cat .paw.two { left: 44px; animation-delay: 0.24s; }
+.mc-roaming-cat .paw.one { left: 22px; }
+.mc-roaming-cat .paw.two { left: 45px; animation-delay: 0.24s; }
 @media (prefers-reduced-motion: reduce) {
     .mc-roaming-cat,
     .mc-roaming-cat .tail,
-    .mc-roaming-cat .paw {
-        animation: none;
-    }
-    .mc-roaming-cat {
-        left: auto;
-        right: 18px;
-        top: auto;
-        bottom: 18px;
-    }
+    .mc-roaming-cat .paw,
+    .mc-roaming-cat .eye { animation: none; }
+    .mc-roaming-cat { left: auto; right: 18px; top: auto; bottom: 18px; }
 }
 </style>
 <div class="mc-roaming-cat" aria-hidden="true">
   <span class="tail"></span>
   <span class="body"></span>
-  <span class="head"><span class="eye left"></span><span class="eye right"></span><span class="collar"></span></span>
+  <span class="head">
+    <span class="eye left"></span><span class="eye right"></span>
+    <span class="nose"></span>
+    <span class="whisker"></span><span class="whisker b"></span>
+    <span class="collar"></span>
+  </span>
   <span class="paw one"></span>
   <span class="paw two"></span>
 </div>
@@ -656,7 +577,10 @@ def _load_history() -> tuple[list[dict], list[dict]]:
                     m.home_team.name,
                     m.away_team.name,
                 ))) and manual["forecast"],
-                "knockout": bool(manual and manual["knockout"]),
+                "knockout": (
+                    manual["knockout"] if manual
+                    else _local_dt(m.date).date() >= _KNOCKOUT_START
+                ),
                 "retroactive": m.prediction is not None and m.result is None,
                 "points": m.result.points if m.result else None,
                 "exact": m.result.exact_score if m.result else False,
@@ -732,6 +656,15 @@ def _match_points(pred: tuple[int, int], real: tuple[int, int], knockout: bool) 
     return 0
 
 
+# Outcome-tier colours, shared by point badges and the breakdown charts.
+_TIER_COLORS = {
+    "exact": "#1f9d57",   # green
+    "diff": "#2c6fb0",    # blue
+    "winner": "#d2901f",  # amber
+    "wrong": "#c0392b",   # red
+}
+
+
 def _points_badge(
     pred: tuple[int, int] | None,
     real: tuple[int, int] | None,
@@ -739,21 +672,21 @@ def _points_badge(
 ) -> tuple[str, int]:
     """Return (html_badge, points) coloured by outcome tier."""
     if pred is None or real is None or real[0] is None:
-        return "<span style='color:#aaa'>—</span>", 0
+        return "<span style='color:#9aa6b2'>—</span>", 0
     pts = _match_points(pred, real, knockout)
     ph, pa = pred
     rh, ra = real
     if ph == rh and pa == ra:
-        color = "#2ecc71"
+        color = _TIER_COLORS["exact"]
     elif (ph - pa) == (rh - ra):
-        color = "#3498db"
+        color = _TIER_COLORS["diff"]
     elif ((ph > pa) - (ph < pa)) == ((rh > ra) - (rh < ra)):
-        color = "#f39c12"
+        color = _TIER_COLORS["winner"]
     else:
-        color = "#e74c3c"
+        color = _TIER_COLORS["wrong"]
     badge = (
-        f"<span style='background:{color};color:white;padding:2px 9px;"
-        f"border-radius:4px;font-weight:bold'>+{pts}</span>"
+        f"<span style='background:{color};color:white;padding:2px 10px;"
+        f"border-radius:6px;font-weight:700'>+{pts}</span>"
     )
     return badge, pts
 
@@ -937,16 +870,15 @@ def _render_app_header() -> None:
     st.markdown(
         f"""
 <div class="mc-hero">
-  <div class="mc-mon">予</div>
   <div class="mc-hero-copy">
-    <div class="mc-kicker">Clean forecast desk</div>
+    <div class="mc-kicker">World Cup 2026 · Prediction desk</div>
     <h1>Prono d'Anto</h1>
-    <p>Des maths, du flair, et une confiance totalement raisonnable dans des scores impossibles.</p>
+    <p>Des maths, du flair, et une confiance totalement raisonnable dans des scores improbables.</p>
     <div class="mc-status-row">
-      <span class="mc-chip">Model <strong>EV-first</strong></span>
-      <span class="mc-chip">League <strong>World Cup 2026</strong></span>
-      <span class="mc-chip">Timezone <strong>GMT+2</strong></span>
-      <span class="mc-chip">Refresh <strong>{last_refresh}</strong></span>
+      <span class="mc-chip">Modèle <strong>EV-first</strong></span>
+      <span class="mc-chip">Compétition <strong>World Cup 2026</strong></span>
+      <span class="mc-chip">Fuseau <strong>GMT+2</strong></span>
+      <span class="mc-chip">Maj <strong>{last_refresh}</strong></span>
     </div>
   </div>
 </div>
@@ -958,10 +890,7 @@ def _render_app_header() -> None:
     with left:
         st.markdown(
             """
-<div class="mc-strip">
-  <strong>勝率</strong>
-  <span>Tonight board, prediction history and Elo simulator are ready.</span>
-</div>
+<div class="mc-strip">Pronos du soir, historique des résultats et simulateur Elo — tout est à jour.</div>
 """,
             unsafe_allow_html=True,
         )
@@ -978,10 +907,10 @@ def _render_app_header() -> None:
 # ------------------------------------------------------------------ #
 
 _COLORS = {
-    "home": "#1f2a44",
-    "draw": "#b8892f",
-    "away": "#d83a2e",
-    "bar": "#5c7f67",
+    "home": "#1b2a4a",   # navy (home win)
+    "draw": "#7b8794",   # slate (draw)
+    "away": "#c2502f",   # terracotta (away win)
+    "bar": "#1b2a4a",    # navy (generic bars)
 }
 
 
@@ -1149,7 +1078,7 @@ def render_upcoming() -> None:
     for day in sorted(groups.keys()):
         if day == today_utc:
             st.markdown(
-                "<h2 style='color:#e74c3c;margin-bottom:4px'>🔴 Tonight</h2>",
+                "<h2 style='color:#c2502f;margin-bottom:4px'>🔴 Tonight</h2>",
                 unsafe_allow_html=True,
             )
         elif day == today_utc + timedelta(days=1):
@@ -1214,9 +1143,9 @@ def render_history() -> None:
     if scored:
         # ── Breakdown bar ────────────────────────────────────────────
         fig, ax = plt.subplots(figsize=(8, 3))
-        labels = ["Exact 6pt", "Diff 4pt", "Winner 2pt", "Wrong 0pt"]
+        labels = ["Exact", "Goal diff", "Winner", "Wrong"]
         values = [n_exact, n_diff, n_win, n_wrong]
-        colors = ["#2ecc71", "#3498db", "#f39c12", "#e74c3c"]
+        colors = [_TIER_COLORS["exact"], _TIER_COLORS["diff"], _TIER_COLORS["winner"], _TIER_COLORS["wrong"]]
         ax.bar(labels, values, color=colors)
         for idx, value in enumerate(values):
             ax.text(idx, value + 0.2, str(value), ha="center", va="bottom", fontsize=9)
@@ -1244,7 +1173,7 @@ def render_history() -> None:
             y = [t["cumulative"] for t in timeline_pts]
             ax.plot(x, y, marker="o", color=_COLORS["bar"], linewidth=2)
             for xi, yi, item in zip(x, y, timeline_pts):
-                ax.scatter([xi], [yi], s=60, color={0: "#e74c3c", 2: "#f39c12", 4: "#3498db", 6: "#2ecc71"}.get(item["pts"], "#5c7f67"))
+                ax.scatter([xi], [yi], s=60, color={0: _TIER_COLORS["wrong"], 2: _TIER_COLORS["winner"], 4: _TIER_COLORS["diff"], 6: _TIER_COLORS["exact"]}.get(item["pts"], "#7b8794"))
             ax.set_title("Cumulative points — WC 2026")
             ax.set_xlabel("Scored prediction #")
             ax.set_ylabel("Total points")

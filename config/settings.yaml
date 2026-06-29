@@ -32,6 +32,9 @@ competition:
   group_stage_goal_difference_points: 2
   group_stage_exact_score_points: 3
   knockout_multiplier: 2
+  # Matches on/after this date count as knockout (points doubled) unless
+  # score.md explicitly labels them otherwise.
+  knockout_start_date: "2026-06-28"
 
 competitions:
   - code: "WC"
