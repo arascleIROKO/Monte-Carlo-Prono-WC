@@ -1,6 +1,6 @@
 api:
   base_url: "https://api.football-data.org/v4"
-  key: "7768092fc3bb4d778ab8abf7f05f58c4"
+  key: ""  # Set via FOOTBALL_API_KEY env var / Streamlit secret — never commit a real key.
   rate_limit_seconds: 6  # Free tier: 10 requests/minute
 
 database:

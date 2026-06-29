@@ -2,6 +2,7 @@
 
 Run with:  streamlit run dashboard/app.py
 """
+import os
 import re
 import sys
 import unicodedata
@@ -29,6 +30,15 @@ st.set_page_config(
     page_icon="⚽",
     layout="wide",
 )
+
+# Bridge the Streamlit secret into the environment before load_config() runs
+# (and caches), so the Football-Data key set in Streamlit Cloud → Secrets is
+# picked up. No-op when no secret is configured.
+try:
+    if "FOOTBALL_API_KEY" in st.secrets:
+        os.environ.setdefault("FOOTBALL_API_KEY", str(st.secrets["FOOTBALL_API_KEY"]))
+except Exception:
+    pass
 
 init_db()
 
@@ -337,6 +347,14 @@ div[data-testid="stExpander"] {
     font-weight: 600;
     box-shadow: none;
     transition: background 120ms ease, border-color 120ms ease;
+}
+.stButton > button p,
+.stButton > button span,
+.stButton > button div,
+.stButton > button:hover p,
+.stButton > button:hover span,
+.stButton > button:hover div {
+    color: #ffffff !important;
 }
 .stButton > button:hover {
     background: var(--mc-indigo-d);
