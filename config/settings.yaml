@@ -1,0 +1,37 @@
+api:
+  base_url: "https://api.football-data.org/v4"
+  key: "7768092fc3bb4d778ab8abf7f05f58c4"
+  rate_limit_seconds: 6  # Free tier: 10 requests/minute
+
+database:
+  path: "database/database.db"
+
+elo:
+  k_factor: 40
+  home_advantage: 65
+  initial_rating: 1000
+
+expected_goals:
+  base_lambda: 1.40        # Calibrated on finished WC matches (walk-forward)
+  elo_sensitivity: 0.001   # How much Elo difference affects xG (Elo-only fallback)
+  min_matches_for_stats: 1 # Use stats model once a team has played this many matches
+
+poisson:
+  max_goals: 6
+
+simulation:
+  iterations: 100000
+
+competition:
+  winner_points: 2
+  goal_difference_points: 4
+  exact_score_points: 6
+
+competitions:
+  - code: "WC"
+    name: "FIFA World Cup"
+  - code: "EC"
+    name: "UEFA European Championship"
+
+recommendations:
+  top_n: 5
