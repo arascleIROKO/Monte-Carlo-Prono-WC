@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import time
 
 import numpy as np
-import plotly.graph_objects as go
+import matplotlib.pyplot as plt
 import streamlit as st
 from sqlalchemy.orm import selectinload
 
@@ -865,10 +865,9 @@ def _render_app_header() -> None:
 
 
 # ------------------------------------------------------------------ #
-# Plotly chart helpers                                                 #
+# Matplotlib chart helpers                                             #
 # ------------------------------------------------------------------ #
 
-_TRANSPARENT = "rgba(0,0,0,0)"
 _COLORS = {
     "home": "#1f2a44",
     "draw": "#b8892f",
@@ -877,51 +876,51 @@ _COLORS = {
 }
 
 
+def _display_fig(fig: plt.Figure) -> None:
+    fig.patch.set_alpha(0)
+    for ax in fig.axes:
+        ax.set_facecolor((1, 1, 1, 0))
+    st.pyplot(fig, clear_figure=True)
+    plt.close(fig)
+
+
 def _win_prob_bar(probs: dict, home_name: str, away_name: str, key: str = "") -> None:
     """Compact horizontal stacked bar showing win/draw/loss probabilities."""
-    fig = go.Figure(go.Bar(
-        x=[probs["home"], probs["draw"], probs["away"]],
-        y=[f"🏠 {home_name}", "🤝 Draw", f"✈️ {away_name}"],
-        orientation="h",
-        marker_color=[_COLORS["home"], _COLORS["draw"], _COLORS["away"]],
-        text=[_pct(probs["home"]), _pct(probs["draw"]), _pct(probs["away"])],
-        textposition="inside",
-        insidetextanchor="middle",
-        hovertemplate="%{y}: %{x:.1%}<extra></extra>",
-    ))
-    fig.update_layout(
-        height=120,
-        margin=dict(l=0, r=0, t=4, b=4),
-        xaxis=dict(range=[0, 1], showticklabels=False, showgrid=False),
-        yaxis=dict(showgrid=False),
-        showlegend=False,
-        paper_bgcolor=_TRANSPARENT,
-        plot_bgcolor=_TRANSPARENT,
-    )
-    st.plotly_chart(fig, use_container_width=True, key=key or None)
+    fig, ax = plt.subplots(figsize=(9, 2.2))
+    values = [probs["home"], probs["draw"], probs["away"]]
+    labels = [f"🏠 {home_name}", "🤝 Draw", f"✈️ {away_name}"]
+    colors = [_COLORS["home"], _COLORS["draw"], _COLORS["away"]]
+    left = 0.0
+    for value, label, color in zip(values, labels, colors):
+        ax.barh([0], [value], left=left, color=color, height=0.46)
+        ax.text(left + value / 2, 0, _pct(value), ha="center", va="center", color="white", fontsize=10, fontweight="bold")
+        left += value
+    ax.set_xlim(0, 1)
+    ax.set_yticks([])
+    ax.set_xticks([])
+    ax.set_frame_on(False)
+    ax.set_title(f"{labels[0]}   {labels[1]}   {labels[2]}", fontsize=10, color="#475467", pad=10)
+    _display_fig(fig)
 
 
 def _top5_ev_bar(top: list[dict], key: str = "") -> None:
     """Horizontal bar of top-5 predicted scores ranked by Expected Value."""
-    fig = go.Figure(go.Bar(
-        x=[s["ev"] for s in top],
-        y=[f"{s['home']}–{s['away']}" for s in top],
-        orientation="h",
-        marker_color=_COLORS["bar"],
-        text=[f"EV {s['ev']:.2f}  ·  {_pct(s['probability'])}" for s in top],
-        textposition="outside",
-        hovertemplate="Score %{y}<br>EV: %{x:.3f}<extra></extra>",
-    ))
-    fig.update_layout(
-        height=210,
-        margin=dict(l=0, r=80, t=4, b=4),
-        xaxis_title="Expected Value",
-        xaxis=dict(showgrid=True, gridcolor="rgba(128,128,128,0.2)"),
-        yaxis=dict(autorange="reversed", showgrid=False),
-        paper_bgcolor=_TRANSPARENT,
-        plot_bgcolor=_TRANSPARENT,
-    )
-    st.plotly_chart(fig, use_container_width=True, key=key or None)
+    fig, ax = plt.subplots(figsize=(9, 3.0))
+    ordered = list(reversed(top))
+    scores = [f"{s['home']}–{s['away']}" for s in ordered]
+    evs = [s["ev"] for s in ordered]
+    probs = [s["probability"] for s in ordered]
+    y_pos = np.arange(len(scores))
+    ax.barh(y_pos, evs, color=_COLORS["bar"])
+    ax.set_yticks(y_pos)
+    ax.set_yticklabels(scores)
+    for y, ev, prob in zip(y_pos, evs, probs):
+        ax.text(ev + 0.02, y, f"EV {ev:.2f}  ·  {_pct(prob)}", va="center", ha="left", fontsize=9, color="#344054")
+    ax.set_xlabel("Expected Value")
+    ax.grid(axis="x", alpha=0.2)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    _display_fig(fig)
 
 
 def _render_heatmaps(
@@ -936,78 +935,35 @@ def _render_heatmaps(
         ev_mat = _compute_ev_matrix(matrix)
         n = matrix.shape[0]
         axis_labels = list(range(n))
+        rh, ra = rec["home"], rec["away"]
 
         col_a, col_b = st.columns(2)
-
-        rh, ra = rec["home"], rec["away"]
 
         with col_a:
             st.markdown("**Score probability surface**")
             st.caption("Where the game is likely to land. Wide spread = volatile match.")
-            fig_prob = go.Figure(go.Heatmap(
-                z=matrix,
-                x=axis_labels,
-                y=axis_labels,
-                colorscale="YlOrRd",
-                hovertemplate=(
-                    f"{home_name}: %{{x}}<br>"
-                    f"{away_name}: %{{y}}<br>"
-                    "P = %{z:.3f}<extra></extra>"
-                ),
-            ))
-            fig_prob.add_shape(
-                type="rect",
-                x0=rh - 0.5, x1=rh + 0.5,
-                y0=ra - 0.5, y1=ra + 0.5,
-                line=dict(color="white", width=2),
-            )
-            fig_prob.update_layout(
-                xaxis_title=f"{home_name} goals",
-                yaxis_title=f"{away_name} goals",
-                height=340,
-                margin=dict(l=50, r=20, t=20, b=50),
-                paper_bgcolor=_TRANSPARENT,
-                plot_bgcolor=_TRANSPARENT,
-            )
-            st.plotly_chart(
-                fig_prob,
-                use_container_width=True,
-                key=f"{key_prefix}_prob" or None,
-            )
+            fig, ax = plt.subplots(figsize=(6, 5))
+            im = ax.imshow(matrix, origin="lower", cmap="YlOrRd", aspect="auto")
+            ax.add_patch(plt.Rectangle((rh - 0.5, ra - 0.5), 1, 1, fill=False, edgecolor="white", linewidth=2))
+            ax.set_xlabel(f"{home_name} goals")
+            ax.set_ylabel(f"{away_name} goals")
+            ax.set_xticks(axis_labels)
+            ax.set_yticks(axis_labels)
+            fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+            _display_fig(fig)
 
         with col_b:
             st.markdown("**EV landscape**")
             st.caption("Expected points for each possible prediction. Peak = best score to submit.")
-            fig_ev = go.Figure(go.Heatmap(
-                z=ev_mat,
-                x=axis_labels,
-                y=axis_labels,
-                colorscale="RdYlGn",
-                hovertemplate=(
-                    f"Predict {home_name}: %{{x}}<br>"
-                    f"Predict {away_name}: %{{y}}<br>"
-                    "EV = %{z:.3f} pts<extra></extra>"
-                ),
-            ))
-            fig_ev.add_shape(
-                type="rect",
-                x0=rh - 0.5, x1=rh + 0.5,
-                y0=ra - 0.5, y1=ra + 0.5,
-                line=dict(color="white", width=2),
-            )
-            fig_ev.update_layout(
-                xaxis_title=f"{home_name} goals (predicted)",
-                yaxis_title=f"{away_name} goals (predicted)",
-                height=340,
-                margin=dict(l=50, r=20, t=20, b=50),
-                paper_bgcolor=_TRANSPARENT,
-                plot_bgcolor=_TRANSPARENT,
-            )
-            st.plotly_chart(
-                fig_ev,
-                use_container_width=True,
-                key=f"{key_prefix}_ev" or None,
-            )
+            fig, ax = plt.subplots(figsize=(6, 5))
+            im = ax.imshow(ev_mat, origin="lower", cmap="RdYlGn", aspect="auto")
+            ax.add_patch(plt.Rectangle((rh - 0.5, ra - 0.5), 1, 1, fill=False, edgecolor="white", linewidth=2))
+            ax.set_xlabel(f"{home_name} goals (predicted)")
+            ax.set_ylabel(f"{away_name} goals (predicted)")
+            ax.set_xticks(axis_labels)
+            ax.set_yticks(axis_labels)
+            fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+            _display_fig(fig)
 
 
 # ------------------------------------------------------------------ #
@@ -1149,23 +1105,18 @@ def render_history() -> None:
 
     if scored:
         # ── Breakdown bar ────────────────────────────────────────────
-        fig_bd = go.Figure(go.Bar(
-            x=["Exact 6pt", "Diff 4pt", "Winner 2pt", "Wrong 0pt"],
-            y=[n_exact, n_diff, n_win, n_wrong],
-            marker_color=["#2ecc71", "#3498db", "#f39c12", "#e74c3c"],
-            text=[n_exact, n_diff, n_win, n_wrong],
-            textposition="outside",
-            hovertemplate="%{x}: %{y} predictions<extra></extra>",
-        ))
-        fig_bd.update_layout(
-            title="Prediction breakdown",
-            yaxis_title="Predictions",
-            height=280,
-            margin=dict(l=20, r=20, t=40, b=20),
-            paper_bgcolor=_TRANSPARENT,
-            plot_bgcolor=_TRANSPARENT,
-        )
-        st.plotly_chart(fig_bd, use_container_width=True)
+        fig, ax = plt.subplots(figsize=(8, 3))
+        labels = ["Exact 6pt", "Diff 4pt", "Winner 2pt", "Wrong 0pt"]
+        values = [n_exact, n_diff, n_win, n_wrong]
+        colors = ["#2ecc71", "#3498db", "#f39c12", "#e74c3c"]
+        ax.bar(labels, values, color=colors)
+        for idx, value in enumerate(values):
+            ax.text(idx, value + 0.2, str(value), ha="center", va="bottom", fontsize=9)
+        ax.set_ylabel("Predictions")
+        ax.set_title("Prediction breakdown")
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        _display_fig(fig)
 
         # ── Cumulative points line ────────────────────────────────────
         timeline_pts: list[dict] = []
@@ -1180,46 +1131,19 @@ def render_history() -> None:
                 })
 
         if len(timeline_pts) > 1:
-            fig_cum = go.Figure(go.Scatter(
-                x=list(range(1, len(timeline_pts) + 1)),
-                y=[t["cumulative"] for t in timeline_pts],
-                mode="lines+markers",
-                line=dict(color=_COLORS["bar"], width=2),
-                marker=dict(
-                    size=10,
-                    color=[t["pts"] for t in timeline_pts],
-                    colorscale=[
-                        [0.0,  "#e74c3c"],
-                        [0.33, "#f39c12"],
-                        [0.67, "#3498db"],
-                        [1.0,  "#2ecc71"],
-                    ],
-                    cmin=0, cmax=6,
-                    showscale=True,
-                    colorbar=dict(
-                        title="Points",
-                        tickvals=[0, 2, 4, 6],
-                        ticktext=["0 — Wrong", "2 — Winner", "4 — Diff", "6 — Exact"],
-                        len=0.7,
-                    ),
-                ),
-                text=[t["label"] for t in timeline_pts],
-                hovertemplate=(
-                    "#%{x}: %{text}<br>"
-                    "Points: %{marker.color}<br>"
-                    "Cumulative: %{y}<extra></extra>"
-                ),
-            ))
-            fig_cum.update_layout(
-                title="Cumulative points — WC 2026",
-                xaxis_title="Scored prediction #",
-                yaxis_title="Total points",
-                height=300,
-                margin=dict(l=20, r=20, t=40, b=20),
-                paper_bgcolor=_TRANSPARENT,
-                plot_bgcolor=_TRANSPARENT,
-            )
-            st.plotly_chart(fig_cum, use_container_width=True)
+            fig, ax = plt.subplots(figsize=(8, 3.2))
+            x = list(range(1, len(timeline_pts) + 1))
+            y = [t["cumulative"] for t in timeline_pts]
+            ax.plot(x, y, marker="o", color=_COLORS["bar"], linewidth=2)
+            for xi, yi, item in zip(x, y, timeline_pts):
+                ax.scatter([xi], [yi], s=60, color={0: "#e74c3c", 2: "#f39c12", 4: "#3498db", 6: "#2ecc71"}.get(item["pts"], "#5c7f67"))
+            ax.set_title("Cumulative points — WC 2026")
+            ax.set_xlabel("Scored prediction #")
+            ax.set_ylabel("Total points")
+            ax.spines["top"].set_visible(False)
+            ax.spines["right"].set_visible(False)
+            ax.grid(axis="y", alpha=0.2)
+            _display_fig(fig)
 
     st.divider()
 
@@ -1272,28 +1196,18 @@ def render_elo() -> None:
 
     # ── Top-20 Elo horizontal bar ─────────────────────────────────────
     top20 = teams[:20]
-    fig_elo = go.Figure(go.Bar(
-        x=[t["elo"] for t in reversed(top20)],
-        y=[t["name"] for t in reversed(top20)],
-        orientation="h",
-        marker=dict(
-            color=[t["elo"] for t in reversed(top20)],
-            colorscale="Blues",
-            showscale=False,
-        ),
-        text=[f"{t['elo']:.0f}" for t in reversed(top20)],
-        textposition="outside",
-        hovertemplate="%{y}: %{x:.0f} Elo<extra></extra>",
-    ))
-    fig_elo.update_layout(
-        title=f"Top {len(top20)} teams by Elo rating",
-        xaxis_title="Elo",
-        height=540,
-        margin=dict(l=130, r=70, t=40, b=20),
-        paper_bgcolor=_TRANSPARENT,
-        plot_bgcolor=_TRANSPARENT,
-    )
-    st.plotly_chart(fig_elo, use_container_width=True)
+    fig, ax = plt.subplots(figsize=(9, 7))
+    ordered = list(reversed(top20))
+    values = [t["elo"] for t in ordered]
+    names = [t["name"] for t in ordered]
+    ax.barh(names, values, color=plt.cm.Blues(np.linspace(0.35, 0.85, len(ordered))))
+    for idx, value in enumerate(values):
+        ax.text(value + 4, idx, f"{value:.0f}", va="center", ha="left", fontsize=9)
+    ax.set_title(f"Top {len(top20)} teams by Elo rating")
+    ax.set_xlabel("Elo")
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    _display_fig(fig)
 
     st.dataframe(
         [
