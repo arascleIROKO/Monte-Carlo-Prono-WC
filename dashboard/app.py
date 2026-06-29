@@ -681,6 +681,20 @@ _TIER_COLORS = {
     "winner": "#d2901f",  # amber
     "wrong": "#c0392b",   # red
 }
+_TIER_KEYS = ("exact", "diff", "winner", "wrong")
+
+
+def _outcome_tier(pred: tuple[int, int], real: tuple[int, int]) -> int:
+    """0 = exact, 1 = goal difference, 2 = winner only, 3 = wrong."""
+    ph, pa = pred
+    rh, ra = real
+    if ph == rh and pa == ra:
+        return 0
+    if (ph - pa) == (rh - ra):
+        return 1
+    if ((ph > pa) - (ph < pa)) == ((rh > ra) - (rh < ra)):
+        return 2
+    return 3
 
 
 def _points_badge(
@@ -692,16 +706,7 @@ def _points_badge(
     if pred is None or real is None or real[0] is None:
         return "<span style='color:#9aa6b2'>—</span>", 0
     pts = _match_points(pred, real, knockout)
-    ph, pa = pred
-    rh, ra = real
-    if ph == rh and pa == ra:
-        color = _TIER_COLORS["exact"]
-    elif (ph - pa) == (rh - ra):
-        color = _TIER_COLORS["diff"]
-    elif ((ph > pa) - (ph < pa)) == ((rh > ra) - (rh < ra)):
-        color = _TIER_COLORS["winner"]
-    else:
-        color = _TIER_COLORS["wrong"]
+    color = _TIER_COLORS[_TIER_KEYS[_outcome_tier(pred, real)]]
     badge = (
         f"<span style='background:{color};color:white;padding:2px 10px;"
         f"border-radius:6px;font-weight:700'>+{pts}</span>"
@@ -1116,85 +1121,146 @@ def render_upcoming() -> None:
 # ------------------------------------------------------------------ #
 
 
+@st.cache_data(ttl=600, show_spinner=False)
+def _model_backtest() -> dict[int, tuple[int, int]]:
+    """Walk-forward backtest of the model's recommended scores.
+
+    Replays every finished match in chronological order: each match is
+    predicted from the Elo/goal stats known *before* it is played, then the
+    real result is applied to update those ratings. This scores the model
+    fairly (no lookahead), filling in picks for matches that never had a
+    prediction stored live.
+
+    Returns {match_id: (pred_home, pred_away)}.
+    """
+    from models.elo import expected_goals_blended, update_elo
+    from models.expected_value import recommend
+    from models.poisson import probability_matrix
+
+    cfg = load_config()["elo"]
+    initial = float(cfg["initial_rating"])
+    k_factor = cfg["k_factor"]
+    home_adv = cfg["home_advantage"]
+
+    with get_session() as s:
+        games = [
+            (m.id, m.home_team_id, m.away_team_id, m.home_goals, m.away_goals)
+            for m in (
+                s.query(Match)
+                .filter(Match.status == "FINISHED", Match.home_goals.isnot(None))
+                .order_by(Match.date)
+                .all()
+            )
+        ]
+
+    elo: dict[int, float] = defaultdict(lambda: initial)
+    gf: dict[int, int] = defaultdict(int)
+    ga: dict[int, int] = defaultdict(int)
+    mp: dict[int, int] = defaultdict(int)
+    picks: dict[int, tuple[int, int]] = {}
+
+    for mid, h, a, hg, ag in games:
+        lam_h, lam_a = expected_goals_blended(
+            elo[h], elo[a], gf[h], ga[h], mp[h], gf[a], ga[a], mp[a]
+        )
+        rec = recommend(probability_matrix(lam_h, lam_a))
+        picks[mid] = (rec["home"], rec["away"])
+
+        res = update_elo(elo[h], elo[a], hg, ag, k_factor=k_factor, home_advantage=home_adv)
+        elo[h], elo[a] = res.new_home_elo, res.new_away_elo
+        gf[h] += hg; ga[h] += ag; mp[h] += 1
+        gf[a] += ag; ga[a] += hg; mp[a] += 1
+
+    return picks
+
+
 @st.fragment
 def render_history() -> None:
-    matches, results = _load_history()
+    matches, _results = _load_history()
     manual_total_pts = _load_manual_points_total()
+    model_picks = _model_backtest()
 
-    scored = [r for r in results]
-    n_exact = sum(1 for r in scored if r["exact"])
-    n_diff  = sum(1 for r in scored if r["diff_ok"])
-    n_win   = sum(1 for r in scored if r["winner_ok"])
-    n_wrong = len(scored) - n_exact - n_diff - n_win
-
-    # ── Phase-aware tallies (group 1/2/3, knockout doubled 2/4/6) ────
     # Pre-seed each match's editable forecast from score.md once per session.
     for m in matches:
         skey = f"fc_{m['id']}"
         if skey not in st.session_state:
             st.session_state[skey] = m["manual_forecast"] or ""
 
-    model_total = 0
-    your_total = 0
+    # ── Phase-aware tallies: model (backtest) vs you (your forecasts) ──
+    model_total = your_total = 0
+    model_exact = your_exact = 0
+    breakdown = [0, 0, 0, 0]  # exact / goal diff / winner / wrong (model)
     for m in matches:
         real = (m["home_goals"], m["away_goals"])
         if real[0] is None:
             continue
-        if m["pred_home"] is not None:
-            model_total += _match_points(
-                (m["pred_home"], m["pred_away"]), real, m["knockout"]
-            )
+        pick = model_picks.get(m["id"])
+        if pick is not None:
+            model_total += _match_points(pick, real, m["knockout"])
+            tier = _outcome_tier(pick, real)
+            breakdown[tier] += 1
+            model_exact += tier == 0
         your = _parse_score(st.session_state.get(f"fc_{m['id']}", ""))
         if your is not None:
             your_total += _match_points(your, real, m["knockout"])
+            your_exact += your == real
 
     # ── Summary metrics ──────────────────────────────────────────────
     st.markdown("### Summary")
     c1, c2, c3, c4, c5, c6 = st.columns(6)
     c1.metric("WC Matches Played", len(matches))
-    c2.metric("Model Predictions", len(scored))
-    c3.metric("Model Points", model_total)
-    c4.metric("Your Points", your_total)
-    c5.metric("Exact Scores", n_exact)
+    c2.metric("Model Points", model_total)
+    c3.metric("Your Points", your_total)
+    c4.metric("Model Exact", model_exact)
+    c5.metric("Your Exact", your_exact)
     c6.metric("Points Anto (score.md)", manual_total_pts if manual_total_pts is not None else "—")
+    st.caption(
+        "Model = walk-forward backtest (each match predicted from pre-match Elo, "
+        "then the result applied — no lookahead). “Points Anto” is your official "
+        "score.md total, including bonus questions."
+    )
 
-    if scored:
-        # ── Breakdown bar ────────────────────────────────────────────
+    if sum(breakdown):
+        # ── Model prediction breakdown ───────────────────────────────
         fig, ax = plt.subplots(figsize=(8, 3))
         labels = ["Exact", "Goal diff", "Winner", "Wrong"]
-        values = [n_exact, n_diff, n_win, n_wrong]
-        colors = [_TIER_COLORS["exact"], _TIER_COLORS["diff"], _TIER_COLORS["winner"], _TIER_COLORS["wrong"]]
-        ax.bar(labels, values, color=colors)
-        for idx, value in enumerate(values):
+        colors = [_TIER_COLORS[key] for key in _TIER_KEYS]
+        ax.bar(labels, breakdown, color=colors)
+        for idx, value in enumerate(breakdown):
             ax.text(idx, value + 0.2, str(value), ha="center", va="bottom", fontsize=9)
-        ax.set_ylabel("Predictions")
-        ax.set_title("Prediction breakdown")
+        ax.set_ylabel("Matches")
+        ax.set_title("Model prediction breakdown")
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
         _display_fig(fig)
 
-        # ── Cumulative points line ────────────────────────────────────
-        timeline_pts: list[dict] = []
-        cumulative = 0
-        for m_row in reversed(matches):
-            if m_row["points"] is not None:
-                cumulative += m_row["points"]
-                timeline_pts.append({
-                    "label": f"{m_row['home_name']} v {m_row['away_name']}",
-                    "cumulative": cumulative,
-                    "pts": m_row["points"],
-                })
+        # ── Cumulative points: model vs you ──────────────────────────
+        xs: list[int] = []
+        m_series: list[int] = []
+        y_series: list[int] = []
+        m_cum = y_cum = 0
+        for m in reversed(matches):  # matches arrive newest-first; replay forward
+            real = (m["home_goals"], m["away_goals"])
+            if real[0] is None:
+                continue
+            pick = model_picks.get(m["id"])
+            if pick is not None:
+                m_cum += _match_points(pick, real, m["knockout"])
+            your = _parse_score(st.session_state.get(f"fc_{m['id']}", ""))
+            if your is not None:
+                y_cum += _match_points(your, real, m["knockout"])
+            xs.append(len(xs) + 1)
+            m_series.append(m_cum)
+            y_series.append(y_cum)
 
-        if len(timeline_pts) > 1:
+        if len(xs) > 1:
             fig, ax = plt.subplots(figsize=(8, 3.2))
-            x = list(range(1, len(timeline_pts) + 1))
-            y = [t["cumulative"] for t in timeline_pts]
-            ax.plot(x, y, marker="o", color=_COLORS["bar"], linewidth=2)
-            for xi, yi, item in zip(x, y, timeline_pts):
-                ax.scatter([xi], [yi], s=60, color={0: _TIER_COLORS["wrong"], 2: _TIER_COLORS["winner"], 4: _TIER_COLORS["diff"], 6: _TIER_COLORS["exact"]}.get(item["pts"], "#7b8794"))
-            ax.set_title("Cumulative points — WC 2026")
-            ax.set_xlabel("Scored prediction #")
+            ax.plot(xs, m_series, color=_COLORS["home"], linewidth=2, label="Model")
+            ax.plot(xs, y_series, color=_COLORS["away"], linewidth=2, label="You")
+            ax.set_title("Cumulative points — Model vs You")
+            ax.set_xlabel("Match #")
             ax.set_ylabel("Total points")
+            ax.legend(frameon=False, loc="upper left")
             ax.spines["top"].set_visible(False)
             ax.spines["right"].set_visible(False)
             ax.grid(axis="y", alpha=0.2)
@@ -1202,7 +1268,7 @@ def render_history() -> None:
 
     st.divider()
 
-    # ── Full match timeline ───────────────────────────────────────────
+    # ── Full match table ──────────────────────────────────────────────
     st.markdown("### WC 2026 — Real vs Model vs You")
     st.caption(
         "Type your forecast (e.g. `2-1`) per match — it pre-fills from `score.md`. "
@@ -1221,9 +1287,9 @@ def render_history() -> None:
     for m in matches:
         real = (m["home_goals"], m["away_goals"])
         real_str = f"{m['home_goals']}–{m['away_goals']}"
-        pred = (m["pred_home"], m["pred_away"]) if m["pred_home"] is not None else None
-        pred_str = f"{m['pred_home']}–{m['pred_away']}" if pred else "—"
-        model_badge, _ = _points_badge(pred, real, m["knockout"])
+        pick = model_picks.get(m["id"])
+        pred_str = f"{pick[0]}–{pick[1]}" if pick is not None else "—"
+        model_badge, _ = _points_badge(pick, real, m["knockout"])
 
         row = st.columns(widths, vertical_alignment="center")
         row[0].markdown(_local_dt(m["date"]).strftime("%d %b %H:%M"))
