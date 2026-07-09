@@ -25,7 +25,7 @@ def load_config(config_path: str | None = None) -> dict[str, Any]:
     path = config_path or _CONFIG_PATH
     config: dict[str, Any] = _read_yaml(path)
 
-    env_key = os.environ.get("FOOTBALL_API_KEY")
+    env_key = os.environ.get("FOOTBALL_API_KEY") or os.environ.get("FOOTBALLL_API_KEY")
     if env_key:
         config["api"]["key"] = env_key
 

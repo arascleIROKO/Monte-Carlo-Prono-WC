@@ -35,6 +35,7 @@ jobs:
       - name: Run pipeline
         env:
           FOOTBALL_API_KEY: ${{ secrets.FOOTBALL_API_KEY }}
+          FOOTBALLL_API_KEY: ${{ secrets.FOOTBALLL_API_KEY }}
         run: python pipeline/update.py
 
       - name: Commit refreshed database if it changed
