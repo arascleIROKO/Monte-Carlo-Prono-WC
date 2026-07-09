@@ -9,31 +9,64 @@ from scipy.stats import poisson
 from config.loader import load_config
 
 
+def _dixon_coles_tau(matrix: np.ndarray, lam_home: float, lam_away: float, rho: float) -> np.ndarray:
+    """Apply the Dixon-Coles low-score dependency correction in place.
+
+    The independent-Poisson model misprices the four lowest scorelines; the
+    tau adjustment inflates/deflates 0-0, 1-1, 1-0 and 0-1 by a factor set by
+    ``rho`` (rho<0 lifts draws, the usual football finding).
+    """
+    if rho == 0 or matrix.shape[0] < 2 or matrix.shape[1] < 2:
+        return matrix
+    matrix[0, 0] *= 1.0 - lam_home * lam_away * rho
+    matrix[0, 1] *= 1.0 + lam_home * rho
+    matrix[1, 0] *= 1.0 + lam_away * rho
+    matrix[1, 1] *= 1.0 - rho
+    # Guard against a negative cell from an over-large rho.
+    np.clip(matrix, 0.0, None, out=matrix)
+    return matrix
+
+
 def probability_matrix(
     lambda_home: float,
     lambda_away: float,
     max_goals: int | None = None,
+    rho: float | None = None,
 ) -> np.ndarray:
     """Build a (max_goals+1) x (max_goals+1) matrix of score probabilities.
 
-    Element [i][j] is P(home scores i goals, away scores j goals).
+    Element [i][j] is P(home scores i goals, away scores j goals).  The grid is
+    truncated at ``max_goals`` and then **renormalised to sum to 1** so the
+    discarded tail mass does not bias downstream probabilities and EV.  A
+    Dixon-Coles low-score correction is applied when ``rho`` is non-zero.
 
     Args:
         lambda_home: Expected goals for the home team.
         lambda_away: Expected goals for the away team.
         max_goals: Maximum goals to consider per team. Defaults to config value.
+        rho: Dixon-Coles correlation. Defaults to config poisson.dixon_coles_rho.
 
     Returns:
-        2-D NumPy array with shape (max_goals+1, max_goals+1).
+        2-D NumPy array with shape (max_goals+1, max_goals+1) summing to 1.
     """
+    cfg = load_config()["poisson"]
     if max_goals is None:
-        max_goals = load_config()["poisson"]["max_goals"]
+        max_goals = cfg["max_goals"]
+    if rho is None:
+        rho = cfg.get("dixon_coles_rho", 0.0)
 
     home_probs = np.array([poisson.pmf(g, lambda_home) for g in range(max_goals + 1)])
     away_probs = np.array([poisson.pmf(g, lambda_away) for g in range(max_goals + 1)])
 
     # Outer product: P(home=i, away=j) = P(home=i) * P(away=j)
-    return np.outer(home_probs, away_probs)
+    matrix = np.outer(home_probs, away_probs)
+    matrix = _dixon_coles_tau(matrix, lambda_home, lambda_away, rho)
+
+    # Renormalise so the truncated grid is a proper distribution.
+    total = matrix.sum()
+    if total > 0:
+        matrix = matrix / total
+    return matrix
 
 
 def score_probability(

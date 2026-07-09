@@ -21,9 +21,11 @@ from config.loader import load_config
 from database.db import get_session, init_db
 from database.models import Match, Result, Team
 from models.confidence import calculate_confidence
-from models.elo import expected_goals_blended, win_probabilities
+from models.elo import expected_goals_blended, update_elo
 from models.expected_value import best_predictions, score_ev
-from models.poisson import probability_matrix
+from models.monte_carlo import simulate_match
+from models.poisson import outcome_probabilities, probability_matrix
+from models.strength import weighted_team_stats
 
 st.set_page_config(
     page_title="Prono d'Anto",
@@ -561,23 +563,27 @@ def _load_upcoming() -> list[dict]:
             .order_by(Match.date)
             .all()
         )
-        return [
-            {
+        out = []
+        for m in rows:
+            hgf, hga, hn = weighted_team_stats(s, m.home_team_id, m.date)
+            agf, aga, an = weighted_team_stats(s, m.away_team_id, m.date)
+            out.append({
                 "id": m.id,
                 "date": m.date,
+                "stage": m.stage,
+                "neutral": bool(m.neutral),
                 "home_name": m.home_team.name,
                 "home_elo": m.home_team.elo,
-                "home_gf": m.home_team.goals_for,
-                "home_ga": m.home_team.goals_against,
-                "home_mp": m.home_team.matches_played,
+                "home_gf": hgf,
+                "home_ga": hga,
+                "home_mp": hn,
                 "away_name": m.away_team.name,
                 "away_elo": m.away_team.elo,
-                "away_gf": m.away_team.goals_for,
-                "away_ga": m.away_team.goals_against,
-                "away_mp": m.away_team.matches_played,
-            }
-            for m in rows
-        ]
+                "away_gf": agf,
+                "away_ga": aga,
+                "away_mp": an,
+            })
+        return out
 
 
 @st.cache_data(ttl=600, show_spinner=False)
@@ -645,6 +651,7 @@ def _load_teams() -> list[dict]:
         teams = s.query(Team).order_by(Team.elo.desc()).all()
         return [
             {
+                "id": t.id,
                 "name": t.name,
                 "elo": t.elo,
                 "matches_played": t.matches_played,
@@ -868,13 +875,14 @@ def _compute_match(m: dict) -> dict:
         m["home_elo"], m["away_elo"],
         m["home_gf"], m["home_ga"], m["home_mp"],
         m["away_gf"], m["away_ga"], m["away_mp"],
+        neutral=bool(m.get("neutral", False)),
     )
     matrix = probability_matrix(lam_h, lam_a)
-    probs = win_probabilities(m["home_elo"], m["away_elo"])
+    probs = outcome_probabilities(matrix)
     top = best_predictions(matrix)
     rec = top[0]
     conf = calculate_confidence(matrix, rec["home"], rec["away"])
-    return {
+    result = {
         "probs": probs,
         "top": top,
         "rec": rec,
@@ -882,7 +890,13 @@ def _compute_match(m: dict) -> dict:
         "lam_h": lam_h,
         "lam_a": lam_a,
         "matrix": matrix,
+        "neutral": bool(m.get("neutral", False)),
     }
+    if result["neutral"]:
+        sim = simulate_match(lam_h, lam_a, knockout=True, seed=int(m.get("id", 0)))
+        result["advance_home"] = sim["p_advance_home"]
+        result["advance_away"] = sim["p_advance_away"]
+    return result
 
 
 def _compute_ev_matrix(matrix: np.ndarray) -> np.ndarray:
@@ -1158,43 +1172,53 @@ def _model_backtest() -> dict[int, tuple[int, int]]:
 
     Returns {match_id: (pred_home, pred_away)}.
     """
-    from models.elo import expected_goals_blended, update_elo
     from models.expected_value import recommend
-    from models.poisson import probability_matrix
 
-    cfg = load_config()["elo"]
-    initial = float(cfg["initial_rating"])
-    k_factor = cfg["k_factor"]
-    home_adv = cfg["home_advantage"]
+    cfg = load_config()
+    elo_cfg = cfg["elo"]
+    initial = float(elo_cfg["initial_rating"])
+    k_factor = elo_cfg["k_factor"]
+    base_home_adv = elo_cfg["home_advantage"]
+    neutral_home_adv = elo_cfg.get("home_advantage_neutral", 0)
+    mov_enabled = elo_cfg.get("mov_enabled", False)
+    max_goals = cfg["poisson"]["max_goals"]
 
     with get_session() as s:
-        games = [
-            (m.id, m.home_team_id, m.away_team_id, m.home_goals, m.away_goals)
-            for m in (
-                s.query(Match)
-                .filter(Match.status == "FINISHED", Match.home_goals.isnot(None))
-                .order_by(Match.date)
-                .all()
-            )
-        ]
-
-    elo: dict[int, float] = defaultdict(lambda: initial)
-    gf: dict[int, int] = defaultdict(int)
-    ga: dict[int, int] = defaultdict(int)
-    mp: dict[int, int] = defaultdict(int)
-    picks: dict[int, tuple[int, int]] = {}
-
-    for mid, h, a, hg, ag in games:
-        lam_h, lam_a = expected_goals_blended(
-            elo[h], elo[a], gf[h], ga[h], mp[h], gf[a], ga[a], mp[a]
+        games = (
+            s.query(Match)
+            .filter(Match.status == "FINISHED", Match.home_goals.isnot(None))
+            .order_by(Match.date)
+            .all()
         )
-        rec = recommend(probability_matrix(lam_h, lam_a))
-        picks[mid] = (rec["home"], rec["away"])
 
-        res = update_elo(elo[h], elo[a], hg, ag, k_factor=k_factor, home_advantage=home_adv)
-        elo[h], elo[a] = res.new_home_elo, res.new_away_elo
-        gf[h] += hg; ga[h] += ag; mp[h] += 1
-        gf[a] += ag; ga[a] += hg; mp[a] += 1
+        elo: dict[int, float] = defaultdict(lambda: initial)
+        picks: dict[int, tuple[int, int]] = {}
+
+        for match in games:
+            h, a = match.home_team_id, match.away_team_id
+            hgf, hga, hn = weighted_team_stats(s, h, match.date, cfg)
+            agf, aga, an = weighted_team_stats(s, a, match.date, cfg)
+            neutral = bool(match.neutral)
+            lam_h, lam_a = expected_goals_blended(
+                elo[h], elo[a],
+                hgf, hga, hn,
+                agf, aga, an,
+                neutral=neutral,
+            )
+            rec = recommend(probability_matrix(lam_h, lam_a, max_goals))
+            picks[match.id] = (rec["home"], rec["away"])
+
+            home_adv = neutral_home_adv if neutral else base_home_adv
+            res = update_elo(
+                elo[h],
+                elo[a],
+                match.home_goals,
+                match.away_goals,
+                k_factor=k_factor,
+                home_advantage=home_adv,
+                mov_enabled=mov_enabled,
+            )
+            elo[h], elo[a] = res.new_home_elo, res.new_away_elo
 
     return picks
 
@@ -1396,11 +1420,17 @@ def render_elo() -> None:
     ht = next(t for t in teams if t["name"] == home_name)
     at = next(t for t in teams if t["name"] == away_name)
 
+    now = datetime.now(tz=timezone.utc).replace(tzinfo=None)
+    with get_session() as s:
+        hgf, hga, hn = weighted_team_stats(s, ht["id"], now)
+        agf, aga, an = weighted_team_stats(s, at["id"], now)
+
     m = {
+        "id": (ht["id"] * 100000 + at["id"]) % 2147483647,
         "home_name": ht["name"], "home_elo": ht["elo"],
-        "home_gf": ht["goals_for"], "home_ga": ht["goals_against"], "home_mp": ht["matches_played"],
+        "home_gf": hgf, "home_ga": hga, "home_mp": hn,
         "away_name": at["name"], "away_elo": at["elo"],
-        "away_gf": at["goals_for"], "away_ga": at["goals_against"], "away_mp": at["matches_played"],
+        "away_gf": agf, "away_ga": aga, "away_mp": an,
     }
     calc = _compute_match(m)
     probs = calc["probs"]

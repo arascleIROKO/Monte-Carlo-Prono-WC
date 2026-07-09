@@ -9,18 +9,32 @@ database:
 elo:
   k_factor: 40
   home_advantage: 65
+  home_advantage_neutral: 0
   initial_rating: 1000
+  mov_enabled: true
+  host_nations: []
+  host_advantage: 0
 
 expected_goals:
-  base_lambda: 1.40        # Calibrated on finished WC matches (walk-forward)
-  elo_sensitivity: 0.001   # How much Elo difference affects xG (Elo-only fallback)
-  min_matches_for_stats: 1 # Use stats model once a team has played this many matches
+  base_lambda: 1.40
+  elo_sensitivity: 0.001
+  min_matches_for_stats: 2
+  full_stats_matches: 5.0
+  half_life_days: 365
+  competition_weights:
+    WC: 1.0
+    EC: 0.6
+  lambda_min: 0.3
+  lambda_max: 6.0
+  defense_floor: 0.1
 
 poisson:
   max_goals: 6
+  dixon_coles_rho: 0.0
 
 simulation:
   iterations: 100000
+  extra_time_fraction: 0.37
 
 competition:
   winner_points: 2

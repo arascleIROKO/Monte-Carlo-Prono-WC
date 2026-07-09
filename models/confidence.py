@@ -1,14 +1,18 @@
 """Confidence scoring for match predictions.
 
-Confidence reflects how certain the model is that the recommended prediction
-will earn points.  Specifically it answers: "if the recommended score's winner
-(or draw) is correct, what fraction of outcomes are covered?"
+Confidence answers a single, honest question: **how likely is the recommended
+prediction to earn any points at all?**  Under the competition rules a
+prediction scores only when its *outcome class* (home win / draw / away win) is
+correct — a home-win tip earns nothing on a draw.  So confidence is simply the
+probability of the predicted outcome class:
 
-Formula: confidence = 1 - P(opponent wins outright)
+    home-win prediction → P(home win)
+    away-win prediction → P(away win)
+    draw prediction     → P(draw)
 
-For a home-win prediction, confidence = 1 - P(away win).
-For an away-win prediction, confidence = 1 - P(home win).
-For a draw prediction,      confidence = P(draw).
+The previous definition (``1 - P(opponent wins)``) counted draws as
+"confident" for a home/away tip even though a draw earns zero points there,
+which overstated confidence in tight matches.
 """
 from models.poisson import outcome_probabilities
 import numpy as np
@@ -23,17 +27,13 @@ def calculate_confidence(matrix: np.ndarray, pred_home: int, pred_away: int) -> 
         pred_away: Recommended away goals.
 
     Returns:
-        Confidence as a float between 0 and 1.
+        Probability that the predicted outcome class occurs (so the tip earns
+        at least the winner points), as a float between 0 and 1.
     """
     outcomes = outcome_probabilities(matrix)
 
     if pred_home > pred_away:
-        # Predicting home win → confidence = 1 - P(away win)
-        return 1.0 - outcomes["away"]
-
+        return outcomes["home"]
     if pred_away > pred_home:
-        # Predicting away win → confidence = 1 - P(home win)
-        return 1.0 - outcomes["home"]
-
-    # Predicting draw → confidence = P(draw)
+        return outcomes["away"]
     return outcomes["draw"]

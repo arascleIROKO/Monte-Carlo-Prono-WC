@@ -51,6 +51,8 @@ class Match(Base):
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="SCHEDULED"
     )
+    stage: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
+    neutral: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     home_team: Mapped["Team"] = relationship(
         "Team", foreign_keys=[home_team_id], back_populates="home_matches"

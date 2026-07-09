@@ -6,24 +6,24 @@ from typing import Any
 
 import yaml
 
+_CONFIG_PATH = str(Path(__file__).parent.parent / "config" / "settings.yaml")
 
-@lru_cache(maxsize=None)
+
+@lru_cache(maxsize=1)
+def _read_yaml(path: str) -> dict[str, Any]:
+    """Read and parse settings.yaml once; subsequent calls return the cached result."""
+    with open(path, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f)
+
+
 def load_config(config_path: str | None = None) -> dict[str, Any]:
-    """Load configuration from settings.yaml.
+    """Return the merged configuration (YAML + env-var overrides).
 
-    The result is memoized: settings.yaml is static during a run, and this
-    function is called in hot loops (e.g. the EV engine), so parsing the YAML
-    once avoids thousands of redundant reads. Callers must treat the returned
-    dict as read-only.
-
-    Overrides api.key with the FOOTBALL_API_KEY environment variable if set.
+    The YAML file is read from disk only on the first call; all subsequent
+    calls return the cached dict (O(1)).  Pass a custom path only in tests.
     """
-    if config_path is None:
-        root = Path(__file__).parent.parent
-        config_path = str(root / "config" / "settings.yaml")
-
-    with open(config_path, "r", encoding="utf-8") as f:
-        config: dict[str, Any] = yaml.safe_load(f)
+    path = config_path or _CONFIG_PATH
+    config: dict[str, Any] = _read_yaml(path)
 
     env_key = os.environ.get("FOOTBALL_API_KEY")
     if env_key:
