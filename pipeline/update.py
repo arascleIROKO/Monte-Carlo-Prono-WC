@@ -389,7 +389,7 @@ def run_pipeline() -> None:
     init_db()
 
     for comp in cfg.get("competitions", []):
-        sync_competition(comp["code"])
+        sync_competition(comp["code"], season=comp.get("season"))
 
     update_elo_ratings()
     generate_predictions()

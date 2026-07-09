@@ -1121,14 +1121,24 @@ def _match_card(m: dict, calc: dict) -> None:
 @st.fragment
 def render_upcoming() -> None:
     now_utc = datetime.now(tz=timezone.utc).replace(tzinfo=None)
-    # Keep upcoming and in-play matches, but drop ones whose kickoff is more
-    # than ~3h old (a played game that simply hasn't been marked FINISHED yet),
-    # so stale fixtures don't linger under "Tonight".
-    live_grace = timedelta(hours=3)
-    matches = [m for m in _load_upcoming() if m["date"] >= now_utc - live_grace]
+    scheduled = _load_upcoming()
+    matches = [m for m in scheduled if m["date"] >= now_utc]
 
     if not matches:
-        st.info("No matches on right now — check back when the next fixtures kick off.")
+        if scheduled:
+            latest = max(scheduled, key=lambda m: m["date"])
+            updated = _data_last_updated()
+            refresh = _local_dt(updated).strftime("%d %b %H:%M") if updated else "unknown"
+            latest_dt = _local_dt(latest["date"]).strftime("%d %b %H:%M")
+            st.warning(
+                "No future fixtures are available in the local database. "
+                f"The latest scheduled fixture is {latest['home_name']} vs "
+                f"{latest['away_name']} on {latest_dt}, and the data was last "
+                f"refreshed at {refresh}. Check the FOOTBALL_API_KEY secret and "
+                "run the refresh pipeline to load the next matches."
+            )
+        else:
+            st.info("No scheduled matches found in the database.")
         return
 
     today_utc = now_utc.date()

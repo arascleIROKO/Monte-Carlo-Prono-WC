@@ -53,8 +53,10 @@ competition:
 competitions:
   - code: "WC"
     name: "FIFA World Cup"
+    season: 2026
   - code: "EC"
     name: "UEFA European Championship"
+    season: 2024
 
 recommendations:
   top_n: 5

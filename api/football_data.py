@@ -23,6 +23,11 @@ class FootballDataClient:
     def __init__(self, api_key: Optional[str] = None) -> None:
         config = load_config()
         self._api_key = api_key or config["api"]["key"]
+        if not self._api_key:
+            raise FootballDataError(
+                "FOOTBALL_API_KEY is not configured. Set it in GitHub Actions "
+                "secrets and Streamlit secrets before running the refresh pipeline."
+            )
         self._base_url = config["api"]["base_url"]
         self._rate_limit_seconds = config["api"]["rate_limit_seconds"]
         self._last_request_time: float = 0.0
